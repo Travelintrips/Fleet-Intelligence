@@ -20,12 +20,16 @@ router.get("/readyz", async (req, res) => {
       fleet_drivers: string | null;
       fleet_outstanding: string | null;
       gojek_raw_transactions: string | null;
+      fleet_settings: string | null;
+      fleet_wa_worker_state: string | null;
       companies: string | null;
     }>(`
       select
         to_regclass('public.fleet_drivers')::text as fleet_drivers,
         to_regclass('public.fleet_outstanding')::text as fleet_outstanding,
         to_regclass('public.gojek_raw_transactions')::text as gojek_raw_transactions,
+        to_regclass('public.fleet_settings')::text as fleet_settings,
+        to_regclass('public.fleet_wa_worker_state')::text as fleet_wa_worker_state,
         to_regclass('public.companies')::text as companies
     `);
 
