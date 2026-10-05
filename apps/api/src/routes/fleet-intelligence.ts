@@ -70,6 +70,32 @@ function companyId(req: AdminRequest): number {
   return id;
 }
 
+function requireDestructiveConfirmation(
+  req: AdminRequest,
+  expected: string,
+  options: { ownerOnly?: boolean } = {},
+): { ok: true } | { ok: false; status: number; error: string } {
+  const role = String(req.adminUser?.role ?? "").trim().toLowerCase();
+  if (options.ownerOnly && role !== "owner" && role !== "super_admin") {
+    return { ok: false, status: 403, error: "Aksi ini hanya dapat dilakukan owner/super_admin." };
+  }
+
+  const supplied = String(
+    req.get("x-fleet-confirmation") ??
+    req.body?.confirmation ??
+    "",
+  ).trim();
+
+  if (supplied !== expected) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Konfirmasi destruktif tidak cocok. Gunakan: ${expected}`,
+    };
+  }
+  return { ok: true };
+}
+
 function csvCells(line: string): string[] {
   const out: string[] = [];
   let cur = "";
@@ -1137,6 +1163,9 @@ router.post("/reports/:id/purge", async (req: AdminRequest, res) => {
   const client=await pool.connect();
   try{
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Report ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`PURGE REPORT ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     await client.query("BEGIN");
     await client.query("DELETE FROM public.gojek_failed_rows WHERE company_id=$1 AND report_id=$2",[cid,id]);
     await client.query("DELETE FROM public.fleet_transactions WHERE company_id=$1 AND report_id=$2",[cid,id]);
@@ -1151,6 +1180,9 @@ router.delete("/reports/:id", async (req: AdminRequest, res) => {
   const client=await pool.connect();
   try{
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Report ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`DELETE REPORT ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     await client.query("BEGIN");
     await client.query("DELETE FROM public.gojek_failed_rows WHERE company_id=$1 AND report_id=$2",[cid,id]);
     await client.query("DELETE FROM public.fleet_transactions WHERE company_id=$1 AND report_id=$2",[cid,id]);
@@ -1165,6 +1197,8 @@ router.post("/reports/purge-all", async (req: AdminRequest, res) => {
   const client=await pool.connect();
   try{
     const cid=companyId(req);
+    const confirmation=requireDestructiveConfirmation(req,`PURGE ALL FLEET DATA COMPANY ${cid}`,{ownerOnly:true});
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     await client.query("BEGIN");
     const reports=await client.query<{count:number}>("SELECT COUNT(*)::int count FROM public.fleet_reports WHERE company_id=$1",[cid]);
     await client.query("DELETE FROM public.gojek_failed_rows WHERE company_id=$1",[cid]);
