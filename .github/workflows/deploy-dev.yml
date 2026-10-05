@@ -1,0 +1,104 @@
+name: Deploy Fleet DEV
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm install --ignore-scripts --package-lock=false
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Docker build API
+        run: docker build -t fleet-api-dev-check apps/api
+      - name: Docker build web
+        run: docker build -t fleet-web-dev-check apps/web
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: fleet-dev
+    env:
+      SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+      SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+      SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+      DEPLOY_PATH: ${{ secrets.FLEET_DEV_DEPLOY_PATH }}
+    steps:
+      - name: Validate deploy secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS DEPLOY_PATH; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required fleet-dev secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy DEV over SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          repo="https://github.com/Travelintrips/Fleet-Intelligence.git"
+
+          if [ -d "$DEPLOY_PATH/.git" ]; then
+            cd "$DEPLOY_PATH"
+            git fetch --prune origin main
+            git checkout main
+            git reset --hard origin/main
+          else
+            mkdir -p "$(dirname "$DEPLOY_PATH")"
+            git clone --branch main --single-branch "$repo" "$DEPLOY_PATH"
+            cd "$DEPLOY_PATH"
+          fi
+
+          if [ ! -f deploy/.env.dev ]; then
+            echo "deploy/.env.dev is missing on the server."
+            exit 20
+          fi
+
+          docker compose -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --build --remove-orphans
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18460/healthz >/dev/null               && curl --fail --silent http://127.0.0.1:18460/api/healthz >/dev/null; then
+              docker compose -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev ps
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker compose -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev ps
+          docker compose -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev logs --tail=100
+          exit 21
+          REMOTE
