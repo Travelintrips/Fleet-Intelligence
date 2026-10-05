@@ -214,75 +214,54 @@ function summarizeGojekRows(rows:GojekTransactionRow[]) {
   return {transactionCount:rows.length,totalCredit,totalDebit,netFlow:totalCredit+totalDebit,vehicleCoverage:vehicles.size,driverCoverage:drivers.size,typeBreakdown};
 }
 
-async function ensureFleetTables(): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.fleet_outstanding (
-      id BIGSERIAL PRIMARY KEY,
-      company_id INTEGER NOT NULL,
-      driver_id INTEGER,
-      driver_external_id TEXT,
-      driver_name TEXT NOT NULL,
-      driver_phone TEXT,
-      vehicle_plate TEXT,
-      outstanding_amount NUMERIC(18,2) NOT NULL DEFAULT 0,
-      rental_fee_daily NUMERIC(18,2) NOT NULL DEFAULT 0,
-      last_updated_date DATE,
-      status TEXT NOT NULL DEFAULT 'open',
-      snapshot_source TEXT,
-      due_days INTEGER NOT NULL DEFAULT 0,
-      notes TEXT,
-      resolved_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS fleet_outstanding_company_status_idx
-      ON public.fleet_outstanding(company_id, status)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.fleet_outstanding_import_log (
-      id BIGSERIAL PRIMARY KEY,
-      company_id INTEGER NOT NULL,
-      report_file_name TEXT NOT NULL,
-      uploaded_by TEXT,
-      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      total_rows INTEGER NOT NULL DEFAULT 0,
-      rows_imported INTEGER NOT NULL DEFAULT 0,
-      rows_skipped INTEGER NOT NULL DEFAULT 0,
-      unmatched_drivers INTEGER NOT NULL DEFAULT 0,
-      notes TEXT
-    )
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.fleet_settings (
-      company_id INTEGER PRIMARY KEY,
-      auto_blast_enabled BOOLEAN NOT NULL DEFAULT false,
-      auto_blast_hour INTEGER NOT NULL DEFAULT 8,
-      auto_blast_last_run TIMESTAMPTZ,
-      fleet_cash_account_id INTEGER,
-      fleet_driver_receivable_account_id INTEGER,
-      journal_id INTEGER,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
+async function assertFleetSchemaTables(names: string[]): Promise<void> {
+  const result = await pool.query<{ name: string; exists: boolean }>(
+    `SELECT name, to_regclass('public.' || name) IS NOT NULL AS exists
+       FROM unnest($1::text[]) AS name`,
+    [names],
+  );
+  const missing = result.rows.filter((row) => !row.exists).map((row) => row.name);
+  if (missing.length) {
+    throw new Error(`Fleet schema belum siap. Jalankan migration sebelum service: ${missing.join(", ")}`);
+  }
+}
 
-  if (await tableExists("fleet_drivers")) {
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS rental_fee_daily NUMERIC(18,2) DEFAULT 0`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS vehicle_plate TEXT`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS vehicle_type TEXT`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS applicator_status TEXT`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS vehicle_ownership TEXT`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS source_last_synced_at TIMESTAMPTZ`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS last_active_date DATE`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS total_trips INTEGER NOT NULL DEFAULT 0`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS total_revenue NUMERIC(18,2) NOT NULL DEFAULT 0`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS avg_daily_trips NUMERIC(8,2) NOT NULL DEFAULT 0`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS performance_tier TEXT NOT NULL DEFAULT 'standard'`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS raw_data JSONB`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS source_present_in_latest_snapshot BOOLEAN NOT NULL DEFAULT true`);
-    await pool.query(`ALTER TABLE public.fleet_drivers ADD COLUMN IF NOT EXISTS source_missing_since TIMESTAMPTZ`);
+async function ensureFleetTables(): Promise<void> {
+  await assertFleetSchemaTables([
+    "fleet_outstanding",
+    "fleet_outstanding_import_log",
+    "fleet_settings",
+    "fleet_drivers",
+  ]);
+
+  const requiredDriverColumns = [
+    "rental_fee_daily",
+    "vehicle_plate",
+    "vehicle_type",
+    "applicator_status",
+    "vehicle_ownership",
+    "source_last_synced_at",
+    "last_active_date",
+    "total_trips",
+    "total_revenue",
+    "avg_daily_trips",
+    "performance_tier",
+    "raw_data",
+    "source_present_in_latest_snapshot",
+    "source_missing_since",
+  ];
+  const columns = await pool.query<{ column_name: string }>(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema='public'
+        AND table_name='fleet_drivers'
+        AND column_name = ANY($1::text[])`,
+    [requiredDriverColumns],
+  );
+  const present = new Set(columns.rows.map((row) => row.column_name));
+  const missing = requiredDriverColumns.filter((name) => !present.has(name));
+  if (missing.length) {
+    throw new Error(`Fleet driver schema belum siap. Kolom migration belum tersedia: ${missing.join(", ")}`);
   }
 }
 
@@ -2291,24 +2270,7 @@ router.patch("/cash-payments/:id/cancel", async (req: AdminRequest, res) => {
 const FLEET_EXPENSE_TYPES = ["Ban","Perbaikan","Service Rutin","Asuransi","Bahan Bakar","Parkir","Tilang","Oli","Spare Part","Lainnya"] as const;
 
 async function ensureFleetOpsTables(): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.fleet_expense_budgets (
-      id BIGSERIAL PRIMARY KEY,
-      company_id INTEGER NOT NULL,
-      expense_type TEXT NOT NULL,
-      budget_month DATE NOT NULL,
-      budget_amount NUMERIC(18,2) NOT NULL CHECK (budget_amount >= 0),
-      created_by TEXT,
-      updated_by TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE(company_id, expense_type, budget_month)
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS fleet_expense_budgets_company_month_idx
-      ON public.fleet_expense_budgets(company_id,budget_month)
-  `);
+  await assertFleetSchemaTables(["fleet_expense_budgets"]);
 }
 
 router.get("/expenses", async (req: AdminRequest, res) => {
