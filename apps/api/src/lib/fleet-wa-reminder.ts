@@ -30,19 +30,24 @@ function formatIdr(value: unknown): string {
 }
 
 async function ensureFleetReminderTables() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.fleet_settings (
-      company_id INTEGER PRIMARY KEY,
-      auto_blast_enabled BOOLEAN NOT NULL DEFAULT false,
-      auto_blast_hour INTEGER NOT NULL DEFAULT 8,
-      auto_blast_last_run TIMESTAMPTZ,
-      fleet_cash_account_id INTEGER,
-      fleet_driver_receivable_account_id INTEGER,
-      journal_id INTEGER,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
+  const result = await pool.query<{
+    fleet_settings: string | null;
+    fleet_wa_worker_state: string | null;
+  }>(`
+    select
+      to_regclass('public.fleet_settings')::text as fleet_settings,
+      to_regclass('public.fleet_wa_worker_state')::text as fleet_wa_worker_state
   `);
+
+  const row = result.rows[0];
+  const missing = [
+    !row?.fleet_settings ? "fleet_settings" : null,
+    !row?.fleet_wa_worker_state ? "fleet_wa_worker_state" : null,
+  ].filter(Boolean);
+
+  if (missing.length) {
+    throw new Error(`Fleet reminder schema belum siap: ${missing.join(", ")}`);
+  }
 }
 
 async function updateWorkerState(companyId: number, patch: {
