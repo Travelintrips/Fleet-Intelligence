@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+!deploy/.env.dev.example
+!deploy/.env.prod.example
+npm-debug.log*
+.DS_Store
