@@ -38,6 +38,38 @@ function assertWriteEnabled() {
   }
 }
 
+export async function getFleetAccountingSettings(companyId: number) {
+  const result = await request(`/api/integrations/fleet/companies/${encodeURIComponent(companyId)}/accounting-settings`);
+  return {
+    fleetCashAccountId: Number(result.fleetCashAccountId) || null,
+    fleetDriverReceivableAccountId: Number(result.fleetDriverReceivableAccountId) || null,
+    journalId: Number(result.journalId) || null,
+  };
+}
+
+export async function updateFleetAccountingSettings(args: {
+  companyId: number;
+  fleetCashAccountId: number;
+  fleetDriverReceivableAccountId: number;
+  journalId: number;
+}) {
+  assertWriteEnabled();
+  const key = `fleet-accounting-settings:${args.companyId}:${args.fleetCashAccountId}:${args.fleetDriverReceivableAccountId}:${args.journalId}`;
+  const result = await request(
+    `/api/integrations/fleet/companies/${encodeURIComponent(args.companyId)}/accounting-settings`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      body: JSON.stringify(args),
+    },
+  );
+  return {
+    fleetCashAccountId: Number(result.fleetCashAccountId) || null,
+    fleetDriverReceivableAccountId: Number(result.fleetDriverReceivableAccountId) || null,
+    journalId: Number(result.journalId) || null,
+  };
+}
+
 export async function postFleetCashPayment(args: {
   companyId: number;
   paymentId: number;
@@ -46,9 +78,6 @@ export async function postFleetCashPayment(args: {
   paymentDate: string;
   referenceNo?: string | null;
   actor?: string | null;
-  fleetCashAccountId?: number | null;
-  fleetDriverReceivableAccountId?: number | null;
-  journalId?: number | null;
 }) {
   assertWriteEnabled();
   const key = `fleet-cash-payment:${args.companyId}:${args.paymentId}`;

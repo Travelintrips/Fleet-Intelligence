@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
-import { postFleetCashPayment, reverseFleetCashPayment } from "../lib/central-finance-client";
+import {
+  getFleetAccountingSettings,
+  postFleetCashPayment,
+  reverseFleetCashPayment,
+  updateFleetAccountingSettings,
+} from "../lib/central-finance-client";
 
 const router = Router();
 
@@ -1927,76 +1932,51 @@ router.get("/executive-summary", async (req: AdminRequest, res) => {
 
 router.get("/settings", async (req: AdminRequest, res) => {
   try {
-    await ensureFleetTables();
     const cid = companyId(req);
-    const result = await pool.query(
-      `SELECT fleet_cash_account_id,fleet_driver_receivable_account_id,journal_id
-         FROM public.fleet_settings
-        WHERE company_id=$1
-        LIMIT 1`,
-      [cid],
-    );
-    const row = result.rows[0] as Record<string, unknown> | undefined;
-    res.json({
-      ok: true,
-      fleetCashAccountId: Number(row?.fleet_cash_account_id) || null,
-      fleetDriverReceivableAccountId: Number(row?.fleet_driver_receivable_account_id) || null,
-      journalId: Number(row?.journal_id) || null,
-      source: "fleet_settings",
-    });
+    const settings = await getFleetAccountingSettings(cid);
+    res.json({ ok: true, ...settings, source: "central_finance" });
   } catch (error) {
     req.log.error({ error }, "Fleet settings failed");
-    res.status(503).json({ error: "Gagal mengambil Fleet Accounting Settings." });
+    const message = error instanceof Error ? error.message : "Gagal mengambil Fleet Accounting Settings.";
+    res.status(message.includes("belum dikonfigurasi") ? 409 : 503).json({ error: message });
   }
 });
 
 router.put("/settings", async (req: AdminRequest, res) => {
   try {
-    await ensureFleetTables();
     const cid = companyId(req);
-    const cashId = Number(req.body?.fleetCashAccountId) || null;
-    const receivableId = Number(req.body?.fleetDriverReceivableAccountId) || null;
-    const journalId = Number(req.body?.journalId) || null;
+    const cashId = Number(req.body?.fleetCashAccountId);
+    const receivableId = Number(req.body?.fleetDriverReceivableAccountId);
+    const journalId = Number(req.body?.journalId);
 
-    if ((cashId !== null && cashId <= 0) || (receivableId !== null && receivableId <= 0) || (journalId !== null && journalId <= 0)) {
-      res.status(400).json({ error: "ID COA/journal Fleet tidak valid." });
+    if (
+      !Number.isSafeInteger(cashId) || cashId <= 0 ||
+      !Number.isSafeInteger(receivableId) || receivableId <= 0 ||
+      !Number.isSafeInteger(journalId) || journalId <= 0
+    ) {
+      res.status(400).json({ error: "ID COA/journal Fleet wajib berupa integer positif." });
       return;
     }
 
-    await pool.query(
-      `INSERT INTO public.fleet_settings(
-         company_id,fleet_cash_account_id,fleet_driver_receivable_account_id,journal_id,updated_at
-       ) VALUES($1,$2,$3,$4,NOW())
-       ON CONFLICT(company_id) DO UPDATE SET
-         fleet_cash_account_id=EXCLUDED.fleet_cash_account_id,
-         fleet_driver_receivable_account_id=EXCLUDED.fleet_driver_receivable_account_id,
-         journal_id=EXCLUDED.journal_id,
-         updated_at=NOW()`,
-      [cid,cashId,receivableId,journalId],
-    );
-
-    res.json({ ok:true, fleetCashAccountId:cashId, fleetDriverReceivableAccountId:receivableId, journalId });
+    const settings = await updateFleetAccountingSettings({
+      companyId: cid,
+      fleetCashAccountId: cashId,
+      fleetDriverReceivableAccountId: receivableId,
+      journalId,
+    });
+    res.json({ ok: true, ...settings, source: "central_finance" });
   } catch (error) {
     req.log.error({ error }, "Fleet settings update failed");
-    res.status(503).json({ error: "Gagal menyimpan Fleet Accounting Settings." });
+    const message = error instanceof Error ? error.message : "Gagal menyimpan Fleet Accounting Settings.";
+    res.status(
+      message.includes("belum diaktifkan") ||
+      message.includes("belum dikonfigurasi") ||
+      message.includes("tidak valid")
+        ? 409
+        : 503,
+    ).json({ error: message });
   }
 });
-
-async function getFleetCashSettings(companyId: number) {
-  await ensureFleetTables();
-  const result = await pool.query(
-    `SELECT fleet_cash_account_id,fleet_driver_receivable_account_id,journal_id
-       FROM public.fleet_settings
-      WHERE company_id=$1 LIMIT 1`,
-    [companyId],
-  );
-  const row = result.rows[0] as Record<string,unknown>|undefined;
-  return {
-    fleetCashAccountId: Number(row?.fleet_cash_account_id) || null,
-    fleetDriverReceivableAccountId: Number(row?.fleet_driver_receivable_account_id) || null,
-    journalId: Number(row?.journal_id) || null,
-  };
-}
 
 router.get("/cash-payments", async (req: AdminRequest, res) => {
   try {
@@ -2129,7 +2109,6 @@ router.post("/cash-payments", async (req: AdminRequest, res) => {
     paymentRow=payment.rows[0] as Record<string,unknown>;
     await client.query("COMMIT");
 
-    const settings=await getFleetCashSettings(cid);
     const posting=await postFleetCashPayment({
       paymentId:Number(paymentRow.id),
       companyId:cid,
@@ -2138,7 +2117,6 @@ router.post("/cash-payments", async (req: AdminRequest, res) => {
       paymentDate,
       referenceNo:typeof paymentRow.reference_no==="string"?paymentRow.reference_no:null,
       actor:req.adminUser?.email??"unknown",
-      ...settings,
     });
 
     await client.query("BEGIN");
