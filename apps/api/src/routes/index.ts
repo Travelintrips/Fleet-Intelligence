@@ -16,25 +16,33 @@ router.get("/healthz", (_req, res) => {
 
 router.get("/readyz", async (req, res) => {
   try {
-    const result = await pool.query<{
-      fleet_drivers: string | null;
-      fleet_outstanding: string | null;
-      gojek_raw_transactions: string | null;
-      fleet_settings: string | null;
-      fleet_wa_worker_state: string | null;
-      companies: string | null;
-    }>(`
+    const result = await pool.query<Record<string, string | null>>(`
       select
+        to_regclass('public.fleet_partners')::text as fleet_partners,
         to_regclass('public.fleet_drivers')::text as fleet_drivers,
+        to_regclass('public.fleet_vehicles')::text as fleet_vehicles,
+        to_regclass('public.fleet_reports')::text as fleet_reports,
+        to_regclass('public.fleet_transactions')::text as fleet_transactions,
         to_regclass('public.fleet_outstanding')::text as fleet_outstanding,
-        to_regclass('public.gojek_raw_transactions')::text as gojek_raw_transactions,
+        to_regclass('public.fleet_outstanding_import_log')::text as fleet_outstanding_import_log,
+        to_regclass('public.fleet_alerts')::text as fleet_alerts,
+        to_regclass('public.fleet_accounting_journals')::text as fleet_accounting_journals,
+        to_regclass('public.fleet_cash_payments')::text as fleet_cash_payments,
+        to_regclass('public.fleet_expenses')::text as fleet_expenses,
+        to_regclass('public.fleet_expense_budgets')::text as fleet_expense_budgets,
+        to_regclass('public.fleet_reconciliation_reports')::text as fleet_reconciliation_reports,
         to_regclass('public.fleet_settings')::text as fleet_settings,
+        to_regclass('public.fleet_wa_logs')::text as fleet_wa_logs,
         to_regclass('public.fleet_wa_worker_state')::text as fleet_wa_worker_state,
-        to_regclass('public.companies')::text as companies
+        to_regclass('public.gojek_raw_transactions')::text as gojek_raw_transactions,
+        to_regclass('public.gojek_failed_rows')::text as gojek_failed_rows,
+        to_regclass('public.companies')::text as companies,
+        to_regprocedure('public.fleet_import_driver_snapshot(integer,text,text,jsonb)')::text
+          as fleet_import_driver_snapshot
     `);
 
-    const tables = result.rows[0];
-    const missing = Object.entries(tables ?? {})
+    const dependencies = result.rows[0] ?? {};
+    const missing = Object.entries(dependencies)
       .filter(([, value]) => !value)
       .map(([name]) => name);
 
@@ -42,7 +50,7 @@ router.get("/readyz", async (req, res) => {
       res.status(503).json({
         status: "not_ready",
         service: "fleet-intelligence-api",
-        reason: "required_tables_missing",
+        reason: "required_dependencies_missing",
         missing,
       });
       return;
@@ -51,6 +59,7 @@ router.get("/readyz", async (req, res) => {
     res.json({
       status: "ready",
       service: "fleet-intelligence-api",
+      dependencies: Object.keys(dependencies).length,
     });
   } catch (error) {
     req.log.error({ error }, "Fleet readiness check failed");
