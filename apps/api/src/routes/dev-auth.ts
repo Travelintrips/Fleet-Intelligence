@@ -472,6 +472,11 @@ export function createDevAuthRouter(): Router {
         error: "Email belum diizinkan untuk Dev Login.",
       });
     }
+    if (!user.companyId) {
+      return response.status(503).json({
+        error: "Dev login belum aktif: DEV_COMPANY_ID wajib dikonfigurasi.",
+      });
+    }
 
     const now = Date.now();
     setSessionCookie(response, {
