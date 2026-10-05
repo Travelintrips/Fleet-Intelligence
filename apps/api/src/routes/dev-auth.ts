@@ -114,8 +114,19 @@ function getAllowedEmails(): string[] {
   return configuredEmails;
 }
 
+function getDevCompanyId(): number | null {
+  const raw = String(process.env.DEV_COMPANY_ID ?? "").trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error("DEV_COMPANY_ID harus berupa integer positif.");
+  }
+  return value;
+}
+
 function getDevUsers(): DevAuthUser[] {
   const role = process.env.DEV_LOGIN_ROLE?.trim() || "admin";
+  const companyId = getDevCompanyId();
   return getAllowedEmails().map((email) => {
     const name = email.split("@", 1)[0].replace(/[._-]+/g, " ").trim();
     const firstName = name ? name.replace(/\b\w/g, (letter) => letter.toUpperCase()) : null;
@@ -125,7 +136,7 @@ function getDevUsers(): DevAuthUser[] {
       firstName,
       lastName: null,
       role,
-      companyId: null,
+      companyId,
     };
   });
 }
@@ -459,6 +470,11 @@ export function createDevAuthRouter(): Router {
     if (!user) {
       return response.status(403).json({
         error: "Email belum diizinkan untuk Dev Login.",
+      });
+    }
+    if (!user.companyId) {
+      return response.status(503).json({
+        error: "Dev login belum aktif: DEV_COMPANY_ID wajib dikonfigurasi.",
       });
     }
 
