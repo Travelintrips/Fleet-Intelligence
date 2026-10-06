@@ -5,6 +5,7 @@ import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
 import {
+  assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
   postFleetCashPayment,
   reverseFleetCashPayment,
@@ -2303,6 +2304,20 @@ router.post("/cash-payments", async (req: AdminRequest, res) => {
       : new Date().toISOString().slice(0,10);
     if(!driverName||!Number.isFinite(amount)||amount<=0){
       res.status(400).json({error:"Nama driver dan jumlah pembayaran wajib valid."});
+      return;
+    }
+
+    // Fail before creating a local payment when Central Finance posting is disabled
+    // or its canonical accounting settings cannot be reached. This avoids leaving
+    // a confirmed local payment that the user may accidentally submit again.
+    assertCentralFinanceWriteEnabled();
+    const canonicalSettings = await getFleetAccountingSettings(cid);
+    if (
+      !canonicalSettings.fleetCashAccountId ||
+      !canonicalSettings.fleetDriverReceivableAccountId ||
+      !canonicalSettings.journalId
+    ) {
+      res.status(409).json({ error: "Fleet Accounting Settings di Central Finance belum lengkap." });
       return;
     }
 
