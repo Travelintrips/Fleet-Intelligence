@@ -23,6 +23,15 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain("auto_blast_hour");
   });
 
+  it("fails before recording a cash payment when Central Finance write is unavailable", () => {
+    expect(route).toContain("assertCentralFinanceWriteEnabled();");
+    expect(route).toContain("const canonicalSettings = await getFleetAccountingSettings(cid);");
+    const guardIndex = route.indexOf("assertCentralFinanceWriteEnabled();");
+    const insertIndex = route.indexOf("INSERT INTO public.fleet_cash_payments");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(insertIndex).toBeGreaterThan(guardIndex);
+  });
+
   it("keeps Central Finance journal id when COA-only settings are updated", () => {
     expect(route).toContain("req.body?.journalId ?? current.journalId");
   });
