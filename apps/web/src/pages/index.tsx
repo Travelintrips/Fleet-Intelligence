@@ -53,7 +53,12 @@ type DashboardData = {
   outstanding: Record<string, unknown>;
   rawTotals: Record<string, unknown>;
   snapshotSummary?: Record<string, unknown>;
-  dataSource?: "transactions" | "driver_snapshot";
+  dataSource?: "normalized_transactions" | "raw_transactions" | "driver_snapshot";
+  dataQuality?: {
+    normalizedTransactionRows?: number;
+    rawTransactionRows?: number;
+    tripMetricsAvailable?: boolean;
+  };
   lastUploadDate: string | null;
 };
 
@@ -192,6 +197,13 @@ export default function FleetIntelligenceDashboard() {
   const rawTotals = data?.rawTotals ?? {};
   const snapshotSummary = data?.snapshotSummary ?? {};
   const dataSource = data?.dataSource ?? "driver_snapshot";
+  const dataQuality = data?.dataQuality ?? {};
+  const sourceLabel =
+    dataSource === "normalized_transactions"
+      ? "Sumber: Transaksi ternormalisasi"
+      : dataSource === "raw_transactions"
+        ? "Sumber: Raw transaksi"
+        : "Sumber: CSV Drivers";
   const lastUploadDate = data?.lastUploadDate ?? null;
   const fmtUploadDate = lastUploadDate
     ? new Date(lastUploadDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })
@@ -335,7 +347,7 @@ export default function FleetIntelligenceDashboard() {
             <p className="text-slate-400 text-sm mt-1">
               Dashboard KPI armada & analitik performa driver
               {" · "}<span className="text-blue-400 font-medium">{periodLabel}</span>
-              {" · "}<span className="text-emerald-400 font-medium">{dataSource === "driver_snapshot" ? "Sumber: CSV Drivers" : "Sumber: Transaksi"}</span>
+              {" · "}<span className="text-emerald-400 font-medium">{sourceLabel}</span>
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -373,6 +385,15 @@ export default function FleetIntelligenceDashboard() {
             </Link>
           </div>
         </div>
+
+        {dataSource === "raw_transactions" && !dataQuality.tripMetricsAvailable && (
+          <Card className="bg-amber-950/30 border-amber-800/40">
+            <CardContent className="p-4 text-sm text-amber-200">
+              Trip KPI belum tersedia dari data raw. Sistem tidak lagi menghitung jumlah baris transaksi sebagai jumlah trip.
+              Upload/transform transaksi ternormalisasi untuk mengaktifkan KPI trip dan revenue yang akurat.
+            </CardContent>
+          </Card>
+        )}
 
         {/* Outstanding KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
