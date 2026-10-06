@@ -217,6 +217,12 @@ export default function DriverMacetPage() {
     () => allOpen.filter((r) => (parseFloat(String(r.outstanding_amount)) || 0) > MIN_WA_REMINDER && r.driver_phone),
     [allOpen]
   );
+  const waReady = Boolean(
+    waStatus?.configured &&
+    waStatus?.gatewayHealthy &&
+    waStatus?.deviceId &&
+    waStatus?.deviceStatus === "ONLINE"
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -311,7 +317,7 @@ export default function DriverMacetPage() {
               size="sm"
               className="bg-green-700 hover:bg-green-600 text-white gap-1.5"
               onClick={() => setShowReminderDialog(true)}
-              disabled={waReminderList.length === 0}
+              disabled={waReminderList.length === 0 || !waReady}
             >
               <Send className="w-3.5 h-3.5" />
               WA Reminder Semua
@@ -344,7 +350,7 @@ export default function DriverMacetPage() {
           </div>
         </div>
 
-        <Card className={`${waStatus?.gatewayHealthy && (!waStatus?.deviceId || waStatus?.deviceStatus === "ONLINE")
+        <Card className={`${waReady
           ? "bg-emerald-950/30 border-emerald-800/40"
           : "bg-amber-950/30 border-amber-800/40"}`}>
           <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
@@ -355,10 +361,10 @@ export default function DriverMacetPage() {
                 {waStatus?.deviceId ? ` · Device: ${waStatus.deviceId} · ${waStatus.deviceStatus ?? "UNKNOWN"}` : " · Device Fleet belum dikonfigurasi"}
               </p>
             </div>
-            <Badge className={waStatus?.gatewayHealthy && (!waStatus?.deviceId || waStatus?.deviceStatus === "ONLINE")
+            <Badge className={waReady
               ? "bg-emerald-900/60 text-emerald-300 border-emerald-700"
               : "bg-amber-900/60 text-amber-300 border-amber-700"}>
-              {waStatus?.gatewayHealthy && (!waStatus?.deviceId || waStatus?.deviceStatus === "ONLINE") ? "Siap kirim" : "Perlu perhatian"}
+              {waReady ? "Siap kirim" : "Perlu perhatian"}
             </Badge>
           </CardContent>
         </Card>
