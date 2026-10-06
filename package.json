@@ -2,11 +2,18 @@
   "name": "cst-fleet-intelligence",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["apps/web", "apps/api"],
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
   "scripts": {
     "typecheck": "npm run typecheck -w @workspace/fleet-intelligence && npm run typecheck -w @workspace/fleet-api",
-    "build": "npm run build -w @workspace/fleet-intelligence && npm run build -w @workspace/fleet-api",
-    "test": "npm run test -w @workspace/fleet-intelligence --if-present && npm run test -w @workspace/fleet-api --if-present"
+    "build": "npm run build:workspace && node ./scripts/hostinger-build.mjs",
+    "test": "npm run test -w @workspace/fleet-intelligence --if-present && npm run test -w @workspace/fleet-api --if-present",
+    "hostinger:build": "npm run build",
+    "start": "node --enable-source-maps ./apps/api/dist/index.mjs",
+    "start:production": "NODE_ENV=production APP_ENV=production node --enable-source-maps ./apps/api/dist/index.mjs",
+    "build:workspace": "npm run build -w @workspace/fleet-intelligence && npm run build -w @workspace/fleet-api"
   },
   "engines": {
     "node": "22.x"

@@ -1,0 +1,90 @@
+name: Hostinger Production Verify
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Fleet CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-hostinger-production-verify
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    env:
+      BASE_URL: ${{ vars.FLEET_PROD_BASE_URL || 'https://fleet.cstlogistic.co.id' }}
+    steps:
+      - name: Wait for Fleet production
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            root_code=$(curl --http1.1 -L -sS -o /tmp/root -w "%{http_code}"               --connect-timeout 10 --max-time 20 "$BASE_URL/" || true)
+            health_code=$(curl --http1.1 -L -sS -o /tmp/health -w "%{http_code}"               --connect-timeout 10 --max-time 20 "$BASE_URL/healthz" || true)
+            ready_code=$(curl --http1.1 -L -sS -o /tmp/ready -w "%{http_code}"               --connect-timeout 10 --max-time 20 "$BASE_URL/api/readyz" || true)
+            echo "attempt=$attempt root=$root_code health=$health_code ready=$ready_code"
+            if [ "$root_code" = "200" ] && [ "$health_code" = "200" ] && [ "$ready_code" = "200" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/health 2>/dev/null || true
+              cat /tmp/ready 2>/dev/null || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Validate production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require("fs");
+          const health = JSON.parse(fs.readFileSync("/tmp/health", "utf8"));
+          const ready = JSON.parse(fs.readFileSync("/tmp/ready", "utf8"));
+          if (health.status !== "ok" || health.service !== "fleet-intelligence") {
+            throw new Error("Unexpected root health payload");
+          }
+          if (ready.status !== "ready" || ready.service !== "fleet-intelligence-api") {
+            throw new Error("Fleet API is not ready");
+          }
+          if (Number(ready.dependencies || 0) < 20) {
+            throw new Error("Fleet dependency readiness set is incomplete");
+          }
+          console.log("fleet_production_readiness=PASS dependencies="+ready.dependencies);
+          NODE
+
+      - name: Verify unauthenticated Fleet API is protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --http1.1 -L -sS -o /tmp/protected -w "%{http_code}"             --connect-timeout 10 --max-time 20 "$BASE_URL/api/logistics/fleet/dashboard" || true)
+          echo "dashboard_unauthenticated_http=$code"
+          test "$code" = "401"
+
+      - name: Verify Central Finance writes default off
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --http1.1 -L -sS -o /tmp/settings-write -w "%{http_code}"             --connect-timeout 10 --max-time 20             -X PUT             -H "Content-Type: application/json"             -d '{"fleetCashAccountId":1,"fleetDriverReceivableAccountId":2,"journalId":3}'             "$BASE_URL/api/logistics/fleet/settings" || true)
+          echo "unauthenticated_settings_write_http=$code"
+          test "$code" = "401"
+
+      - name: Summary
+        run: |
+          echo "Fleet production verification: PASS"
+          echo "Target: $BASE_URL"

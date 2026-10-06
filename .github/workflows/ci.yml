@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: fleet-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -25,8 +29,16 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test
+        run: npm run test
+
       - name: Build
         run: npm run build
+
+      - name: Verify Hostinger bundle
+        run: |
+          test -f apps/api/dist/index.mjs
+          test -f apps/api/dist/public/index.html
 
       - name: Docker build API
         run: docker build -t fleet-api-ci apps/api
