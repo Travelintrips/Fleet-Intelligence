@@ -37,6 +37,10 @@ router.get("/readyz", async (req, res) => {
         to_regclass('public.gojek_raw_transactions')::text as gojek_raw_transactions,
         to_regclass('public.gojek_failed_rows')::text as gojek_failed_rows,
         to_regclass('public.companies')::text as companies,
+        to_regclass('public.users')::text as users,
+        to_regclass('public.wa_otp_codes')::text as wa_otp_codes,
+        to_regclass('public.bizportal_email_otp_codes')::text as bizportal_email_otp_codes,
+        to_regclass('public.audit_logs')::text as audit_logs,
         to_regprocedure('public.fleet_import_driver_snapshot(integer,text,text,jsonb)')::text
           as fleet_import_driver_snapshot
     `);
