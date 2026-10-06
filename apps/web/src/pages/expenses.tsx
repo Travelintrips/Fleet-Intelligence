@@ -189,7 +189,11 @@ export default function FleetExpensesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/logistics/fleet/expenses/${id}`, { method: "DELETE", credentials: "include" });
+      const r = await fetch(`/api/logistics/fleet/expenses/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "x-fleet-confirmation": `DELETE EXPENSE ${id}` },
+      });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error ?? "Gagal menghapus");
     },
@@ -210,7 +214,11 @@ export default function FleetExpensesPage() {
 
   const deleteBudgetMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/logistics/fleet/expenses/budgets/${id}`, { method: "DELETE", credentials: "include" });
+      const r = await fetch(`/api/logistics/fleet/expenses/budgets/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "x-fleet-confirmation": `DELETE BUDGET ${id}` },
+      });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error ?? "Gagal menghapus anggaran");
     },
