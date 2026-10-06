@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck -w @workspace/fleet-intelligence && npm run typecheck -w @workspace/fleet-api",
-    "build": "node ./scripts/hostinger-build.mjs",
+    "build": "npm run build:workspace && node ./scripts/hostinger-build.mjs",
     "test": "npm run test -w @workspace/fleet-intelligence --if-present && npm run test -w @workspace/fleet-api --if-present",
     "hostinger:build": "npm run build",
     "start": "node --enable-source-maps ./apps/api/dist/index.mjs",
