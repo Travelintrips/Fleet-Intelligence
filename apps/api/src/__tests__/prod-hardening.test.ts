@@ -32,6 +32,11 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain("requireDestructiveConfirmation");
   });
 
+  it("uses the strictly above Rp50k WA reminder threshold", () => {
+    const reminder = readFileSync(resolve(process.cwd(), "src/lib/fleet-wa-reminder.ts"), "utf8");
+    expect(reminder).toContain("o.outstanding_amount > $3");
+  });
+
   it("exposes non-secret WA gateway and device health", () => {
     expect(route).toContain('router.get("/wa/status"');
     expect(waClient).toContain("getFleetWaGatewayStatus");
