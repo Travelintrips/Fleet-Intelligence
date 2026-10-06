@@ -1,5 +1,3 @@
-import { pool } from "./db";
-
 type Json = Record<string, unknown>;
 
 function required(value: unknown, name: string): string {
@@ -47,6 +45,7 @@ export function assertCentralFinanceWriteEnabled() {
 }
 
 async function getFleetAccountingSettingsDirect(companyId: number) {
+  const { pool } = await import("./db");
   const result = await pool.query(
     `SELECT s.fleet_cash_account_id,
             s.fleet_driver_receivable_account_id,
