@@ -39,6 +39,8 @@ jobs:
         run: |
           test -f apps/api/dist/index.mjs
           test -f apps/api/dist/public/index.html
+          test -f apps/api/dist/public/deploy-version.json
+          node -e 'const v=require("./apps/api/dist/public/deploy-version.json"); if(!v.commit||v.commit==="unknown") process.exit(1)'
 
       - name: Docker build API
         run: docker build -t fleet-api-ci apps/api
