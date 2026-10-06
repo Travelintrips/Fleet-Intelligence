@@ -11,6 +11,9 @@ describe("Fleet integration readiness", () => {
     expect(routes).toContain("assignedDeviceCount");
     expect(routes).toContain("tokenConfigured");
     expect(routes).toContain("writeEnabled");
+    expect(routes).toContain("readReady");
+    expect(routes).toContain("writeReady");
+    expect(routes).toContain("deviceSelection");
     expect(routes).not.toContain("CENTRAL_FINANCE_SERVICE_TOKEN: process.env");
     expect(routes).not.toContain("CST_WA_GATEWAY_TOKEN: process.env");
   });
