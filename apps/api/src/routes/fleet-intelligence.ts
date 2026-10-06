@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
+import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
 import {
   getFleetAccountingSettings,
   postFleetCashPayment,
@@ -866,6 +867,17 @@ router.post("/outstanding/snapshot/confirm", async (req: AdminRequest, res) => {
 });
 
 
+router.get("/wa/status", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const status = await getFleetWaGatewayStatus();
+    res.json({ ok: true, ...status });
+  } catch (error) {
+    req.log.error({ error }, "Fleet WA status failed");
+    res.status(503).json({ error: "Gagal mengambil status WA Gateway Fleet." });
+  }
+});
+
 router.post("/outstanding/:id/wa", async (req: AdminRequest, res) => {
   try {
     const cid=companyId(req);
@@ -1100,6 +1112,15 @@ router.delete("/outstanding/:id", async (req: AdminRequest, res) => {
     await ensureFleetTables();
     const cid = companyId(req);
     const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Outstanding ID tidak valid." });
+      return;
+    }
+    const confirmation = requireDestructiveConfirmation(req, `DELETE OUTSTANDING ${id}`);
+    if (!confirmation.ok) {
+      res.status(confirmation.status).json({ error: confirmation.error });
+      return;
+    }
     const result = await pool.query(
       "DELETE FROM public.fleet_outstanding WHERE id=$1 AND company_id=$2 RETURNING id",
       [id, cid],
