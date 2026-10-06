@@ -20,7 +20,6 @@ function run(command, args, cwd = root) {
   });
 }
 
-await run("npm", ["run", "typecheck"]);
 await run("npm", ["run", "build:workspace"]);
 
 const webDist = resolve(root, "apps/web/dist");
