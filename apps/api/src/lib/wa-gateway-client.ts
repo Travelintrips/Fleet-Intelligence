@@ -45,15 +45,22 @@ export async function sendFleetWa(args: { phone: string; message: string; idempo
 
 export async function getFleetWaGatewayStatus() {
   const baseUrl = String(process.env.CST_WA_GATEWAY_URL ?? process.env.WA_GATEWAY_URL ?? "").trim().replace(/\/$/, "");
+  const token = String(process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN ?? "").trim();
   const deviceId = String(process.env.FLEET_WA_DEVICE_ID ?? "").trim() || null;
-  if (!baseUrl) {
-    return { configured: false, gatewayHealthy: false, gatewayStatus: "UNCONFIGURED", deviceId, deviceStatus: null };
+
+  if (!baseUrl || !token || !deviceId) {
+    return {
+      configured: false,
+      gatewayHealthy: false,
+      gatewayStatus: !baseUrl ? "UNCONFIGURED_URL" : !token ? "UNCONFIGURED_TOKEN" : "UNCONFIGURED_DEVICE",
+      deviceId,
+      deviceStatus: null,
+      visibleDevices: [],
+    };
   }
 
   let gatewayHealthy = false;
   let gatewayStatus = "UNKNOWN";
-  let deviceStatus: string | null = null;
-
   try {
     const health = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(8_000) });
     if (health.ok) {
@@ -67,25 +74,53 @@ export async function getFleetWaGatewayStatus() {
     gatewayStatus = "UNREACHABLE";
   }
 
-  if (deviceId) {
-    try {
-      const status = await fetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(8_000) });
-      if (status.ok) {
-        const html = await status.text();
-        const escaped = deviceId.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
-        const match = html.match(new RegExp(`${escaped}[\\s\\S]{0,220}?<strong[^>]*>([^<]+)<\\/strong>`, "i"));
-        deviceStatus = match?.[1]?.trim().toUpperCase() ?? null;
-      }
-    } catch {
-      deviceStatus = null;
+  let deviceStatus: string | null = null;
+  let visibleDevices: Array<{
+    deviceId: string;
+    name: string | null;
+    status: string;
+    enabled: boolean;
+    lastHeartbeatAt: string | null;
+  }> = [];
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/devices`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (response.ok) {
+      const payload = await response.json().catch(() => null) as {
+        devices?: Array<Record<string, unknown>>;
+      } | null;
+      visibleDevices = Array.isArray(payload?.devices)
+        ? payload!.devices!.map((device) => ({
+            deviceId: String(device.deviceId ?? ""),
+            name: device.name == null ? null : String(device.name),
+            status: String(device.status ?? "UNKNOWN").toUpperCase(),
+            enabled: device.enabled !== false,
+            lastHeartbeatAt: device.lastHeartbeatAt == null ? null : String(device.lastHeartbeatAt),
+          })).filter((device) => Boolean(device.deviceId))
+        : [];
+      const selected = visibleDevices.find((device) => device.deviceId === deviceId);
+      deviceStatus = selected
+        ? selected.enabled ? selected.status : "DISABLED"
+        : "NOT_ASSIGNED";
+    } else if (response.status === 401 || response.status === 403) {
+      deviceStatus = "TOKEN_FORBIDDEN";
+    } else {
+      deviceStatus = `HTTP_${response.status}`;
     }
+  } catch {
+    deviceStatus = "UNREACHABLE";
   }
 
   return {
-    configured: Boolean(baseUrl && (process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN)?.trim() && deviceId),
+    configured: true,
     gatewayHealthy,
     gatewayStatus,
     deviceId,
     deviceStatus,
+    visibleDevices,
   };
 }
+
