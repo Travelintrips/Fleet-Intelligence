@@ -296,6 +296,24 @@ export default function FleetOutstandingPage() {
   const [autoBlastSaving, setAutoBlastSaving] = useState(false);
 
   /* ── QUERIES ──────────────────────────────────────────────────────── */
+  const { data: waStatus } = useQuery({
+    queryKey: ["fleet-wa-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/logistics/fleet/wa/status", { credentials: "include" });
+      const json = await res.json().catch(() => ({})) as {
+        configured?: boolean;
+        gatewayHealthy?: boolean;
+        gatewayStatus?: string;
+        deviceId?: string | null;
+        deviceStatus?: string | null;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Gagal mengambil status WA Fleet");
+      return json;
+    },
+    refetchInterval: 30_000,
+  });
+
   const { data: autoBlastSettings, refetch: refetchAutoBlast } = useQuery({
     queryKey: ["fleet-auto-blast-settings"],
     queryFn: async () => {
@@ -312,6 +330,12 @@ export default function FleetOutstandingPage() {
 
   const autoBlastEnabled = autoBlastSettings?.enabled ?? false;
   const autoBlastLastRun = autoBlastSettings?.last_run ?? null;
+  const waReady = Boolean(
+    waStatus?.configured &&
+    waStatus?.gatewayHealthy &&
+    waStatus?.deviceId &&
+    waStatus?.deviceStatus === "ONLINE"
+  );
 
   async function saveAutoBlast(enabled: boolean, hour?: number) {
     setAutoBlastSaving(true);
@@ -321,11 +345,12 @@ export default function FleetOutstandingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled, hour: hour ?? autoBlastHour }),
       });
-      if (!res.ok) throw new Error("Gagal simpan");
+      const json = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Gagal simpan");
       toast.success(enabled ? `Auto-blast aktif — setiap hari jam ${String(hour ?? autoBlastHour).padStart(2,"0")}:00 WIB` : "Auto-blast dinonaktifkan");
       refetchAutoBlast();
-    } catch {
-      toast.error("Gagal simpan setting auto-blast");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal simpan setting auto-blast");
     } finally {
       setAutoBlastSaving(false);
     }
@@ -390,8 +415,10 @@ export default function FleetOutstandingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ suppress_hours: 1 }),
       });
-      if (!res.ok) throw new Error("Gagal kirim WA reminder");
-      return res.json() as Promise<{ ok: boolean; sent: number; failed: number }>;
+      const json = await res.json().catch(() => ({})) as { ok?: boolean; sent?: number; failed?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Gagal kirim WA reminder");
+      if ((json.sent ?? 0) < 1 && (json.failed ?? 0) > 0) throw new Error(json.error ?? "Tidak ada WA yang berhasil dikirim.");
+      return json as { ok: boolean; sent: number; failed: number };
     },
     onSuccess: (d) => {
       toast.success(`WA terkirim ke ${d.sent} driver${d.failed > 0 ? `, ${d.failed} gagal` : ""}`);
@@ -409,8 +436,10 @@ export default function FleetOutstandingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
-      if (!res.ok) throw new Error("Gagal kirim WA blast");
-      return res.json() as Promise<{ ok: boolean; sent: number; failed: number; total: number }>;
+      const json = await res.json().catch(() => ({})) as { ok?: boolean; sent?: number; failed?: number; total?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Gagal kirim WA blast");
+      if ((json.sent ?? 0) < 1 && (json.failed ?? 0) > 0) throw new Error(json.error ?? "Tidak ada WA yang berhasil dikirim.");
+      return json as { ok: boolean; sent: number; failed: number; total: number };
     },
     onSuccess: (d) => {
       toast.success(`WA terkirim ke ${d.sent} driver${d.failed > 0 ? `, ${d.failed} gagal` : ""}`);
@@ -547,7 +576,9 @@ export default function FleetOutstandingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: waPreview.phone, message: waPreview.message }),
       });
-      if (!res.ok) throw new Error("Gagal kirim WA");
+      const json = await res.json().catch(() => ({})) as { sent?: number; failed?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Gagal kirim WA");
+      if ((json.sent ?? 0) < 1) throw new Error(json.error ?? "WA belum terkirim. Periksa status device Fleet.");
       toast.success(`WA berhasil dikirim ke ${waPreview.name}`);
       setWaPreview(null);
       qc.invalidateQueries({ queryKey: ["fleet-outstanding"] });
@@ -753,6 +784,16 @@ export default function FleetOutstandingPage() {
               </Card>
             </div>
 
+            {!waReady && (
+              <Card className="bg-amber-950/30 border-amber-800/40">
+                <CardContent className="p-3 text-xs text-amber-200">
+                  WA Fleet belum siap. Gateway: {waStatus?.gatewayStatus ?? "Memeriksa…"} ·
+                  Device: {waStatus?.deviceId ?? "belum diset"} ·
+                  Status: {waStatus?.deviceStatus ?? "UNKNOWN"}. Pengiriman dan auto-blast dikunci sampai device ONLINE.
+                </CardContent>
+              </Card>
+            )}
+
             {/* Auto-blast WA toggle */}
             {status === "open" && (
               <Card className="bg-slate-800/60 border-slate-700">
@@ -789,14 +830,14 @@ export default function FleetOutstandingPage() {
                       </div>
                       <Switch
                         checked={autoBlastEnabled}
-                        disabled={autoBlastSaving}
+                        disabled={autoBlastSaving || (!autoBlastEnabled && !waReady)}
                         onCheckedChange={(v) => saveAutoBlast(v, autoBlastHour)}
                       />
                       {autoBlastEnabled && autoBlastHour !== (autoBlastSettings?.hour ?? 8) && (
                         <Button
                           size="sm"
                           className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3"
-                          disabled={autoBlastSaving}
+                          disabled={autoBlastSaving || !waReady}
                           onClick={() => saveAutoBlast(true, autoBlastHour)}
                         >
                           Simpan Jam
@@ -1419,7 +1460,7 @@ export default function FleetOutstandingPage() {
               <div className="flex gap-3 pt-1">
                 <Button variant="outline" className="flex-1 border-slate-600" onClick={() => setWaPreview(null)}>Batal</Button>
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 gap-2"
-                  disabled={waSending || !waPreview.message.trim()} onClick={sendWa}>
+                  disabled={waSending || !waPreview.message.trim() || !waReady} onClick={sendWa}>
                   <Send className="w-4 h-4" />
                   {waSending ? "Mengirim..." : "Kirim WA"}
                 </Button>
@@ -1456,7 +1497,7 @@ export default function FleetOutstandingPage() {
               <div className="flex gap-3 pt-1">
                 <Button variant="outline" className="flex-1 border-slate-600" onClick={() => setBulkOpen(false)}>Batal</Button>
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 gap-2"
-                  disabled={waAllMutation.isPending} onClick={() => waAllMutation.mutate()}>
+                  disabled={waAllMutation.isPending || !waReady} onClick={() => waAllMutation.mutate()}>
                   <Send className="w-4 h-4" />
                   {waAllMutation.isPending ? "Mengirim..." : `Kirim ke ${eligibleActive.length} Driver`}
                 </Button>
@@ -1522,7 +1563,7 @@ export default function FleetOutstandingPage() {
               <div className="flex gap-3 pt-1">
                 <Button variant="outline" className="flex-1 border-slate-600" onClick={() => setWaBlastOpen(false)}>Batal</Button>
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 gap-2"
-                  disabled={waBlastMutation.isPending || selectedIds.size === 0}
+                  disabled={waBlastMutation.isPending || selectedIds.size === 0 || !waReady}
                   onClick={() => waBlastMutation.mutate(Array.from(selectedIds))}>
                   <Send className="w-4 h-4" />
                   {waBlastMutation.isPending ? "Mengirim..." : `Kirim ke ${selectedIds.size} Driver`}

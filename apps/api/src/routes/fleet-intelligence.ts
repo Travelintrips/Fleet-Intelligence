@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
+import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
 import {
+  assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
   postFleetCashPayment,
   reverseFleetCashPayment,
@@ -96,28 +98,49 @@ function requireDestructiveConfirmation(
   return { ok: true };
 }
 
-function csvCells(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
+function csvRows(content: string): string[][] {
+  const input = content.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
   let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
+
+  const pushCell = () => {
+    row.push(cell.trim());
+    cell = "";
+  };
+  const pushRow = () => {
+    pushCell();
+    if (row.some((value) => value.trim() !== "")) rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
     if (ch === '"') {
-      if (quoted && line[i + 1] === '"') {
-        cur += '"';
+      if (quoted && input[i + 1] === '"') {
+        cell += '"';
         i += 1;
       } else {
         quoted = !quoted;
       }
-    } else if (ch === "," && !quoted) {
-      out.push(cur.trim());
-      cur = "";
-    } else {
-      cur += ch;
+      continue;
     }
+    if (ch === "," && !quoted) {
+      pushCell();
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !quoted) {
+      if (ch === "\r" && input[i + 1] === "\n") i += 1;
+      pushRow();
+      continue;
+    }
+    cell += ch;
   }
-  out.push(cur.trim());
-  return out;
+
+  if (cell.length || row.length) pushRow();
+  if (quoted) throw new Error("CSV memiliki kutip yang tidak tertutup.");
+  return rows;
 }
 
 function numberValue(value: unknown): number {
@@ -136,9 +159,9 @@ function cleanPhone(value: unknown): string {
 }
 
 function parseSnapshotCsv(content: string): Array<Omit<SnapshotRow, "match_status" | "matched_driver_id" | "matched_name">> {
-  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return [];
-  const headers = csvCells(lines[0]).map((h) => h.trim().toLowerCase());
+  const rows = csvRows(content);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
   const find = (...names: string[]) => headers.findIndex((h) => names.includes(h));
 
   const nameIdx = find("driver name", "driver_name", "nama driver", "nama");
@@ -152,8 +175,7 @@ function parseSnapshotCsv(content: string): Array<Omit<SnapshotRow, "match_statu
     throw new Error("CSV wajib memiliki kolom Driver Name dan Outstanding.");
   }
 
-  return lines.slice(1).map((line) => {
-    const cells = csvCells(line);
+  return rows.slice(1).map((cells) => {
     return {
       driver_name: String(cells[nameIdx] ?? "").trim(),
       phone_number: phoneIdx >= 0 ? cleanPhone(cells[phoneIdx]) : "",
@@ -181,9 +203,9 @@ type GojekTransactionRow = {
 };
 
 function parseGojekTransactionCsv(content: string) {
-  const lines=content.replace(/^\uFEFF/,"").split(/\r?\n/).filter(line=>line.trim());
-  if(lines.length<2) return {headers:[] as string[],rows:[] as GojekTransactionRow[],mapping:{} as Record<string,string|null>,warnings:["File tidak memiliki data."]};
-  const headers=csvCells(lines[0]).map(h=>h.trim());
+  const parsedRows=csvRows(content);
+  if(parsedRows.length<2) return {headers:[] as string[],rows:[] as GojekTransactionRow[],mapping:{} as Record<string,string|null>,warnings:["File tidak memiliki data."]};
+  const headers=parsedRows[0].map(h=>h.trim());
   const normalized=headers.map(h=>h.toLowerCase().replace(/[()]/g,"").replace(/[_-]+/g," ").replace(/\s+/g," ").trim());
   const find=(...names:string[])=>normalized.findIndex(h=>names.includes(h));
   const idx={
@@ -205,8 +227,8 @@ function parseGojekTransactionCsv(content: string) {
   const warnings:string[]=[];
   if(idx.gopayRef<0) warnings.push("GoPay Reference ID tidak ditemukan; dedup akan memakai fallback.");
   if(idx.driverExtId<0) warnings.push("Driver ID tidak ditemukan.");
-  const rows=lines.slice(1).map(line=>{
-    const cells=csvCells(line),raw:Record<string,string>={};
+  const rows=parsedRows.slice(1).map(cells=>{
+    const raw:Record<string,string>={};
     headers.forEach((h,i)=>{raw[h]=cells[i]??"";});
     const dateRaw=String(cells[idx.txDate>=0?idx.txDate:idx.simpleDate]??"").trim();
     let txDate="";
@@ -340,10 +362,16 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
     ]);
 
     const topDrivers = await pool.query(
-      `SELECT driver_name AS name, vehicle_plate, 0::int AS trips, outstanding_amount AS outstanding
-         FROM public.fleet_outstanding
-        WHERE company_id=$1 AND status='open'
-        ORDER BY outstanding_amount DESC
+      `SELECT o.driver_name AS name,
+              COALESCE(NULLIF(d.vehicle_plate,''),o.vehicle_plate) AS vehicle_plate,
+              COALESCE(d.total_trips,0)::int AS trips,
+              o.outstanding_amount AS outstanding
+         FROM public.fleet_outstanding o
+         LEFT JOIN public.fleet_drivers d
+           ON d.id=o.driver_id
+          AND d.company_id=o.company_id::text
+        WHERE o.company_id=$1 AND o.status='open'
+        ORDER BY o.outstanding_amount DESC
         LIMIT 10`,
       [cid],
     );
@@ -378,7 +406,8 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       const [kpiResult, trendResult, rawResult] = await Promise.all([
         pool.query(
           `SELECT COUNT(DISTINCT NULLIF(driver_external_id,''))::int AS total_drivers,
-                  COUNT(*)::int AS total_trips,
+                  0::int AS total_trips,
+                  COUNT(*)::int AS raw_transaction_rows,
                   COALESCE(SUM(amount),0)::numeric AS total_amount_raw,
                   COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0)::numeric AS total_rental_due,
                   COALESCE(SUM(amount),0)::numeric AS total_net,
@@ -395,7 +424,8 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
                   COALESCE(SUM(amount),0)::numeric AS net_revenue,
                   COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0)::numeric AS gross_revenue,
                   COUNT(DISTINCT NULLIF(driver_external_id,''))::int AS active_drivers,
-                  COUNT(*)::int AS total_trips
+                  0::int AS total_trips,
+                  COUNT(*)::int AS raw_transaction_rows
              FROM public.gojek_raw_transactions
             WHERE company_id=$1 AND date_iso IS NOT NULL AND ${periodSql}
             GROUP BY date_iso
@@ -427,6 +457,49 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       rawTotals = rawResult.rows[0] ?? rawTotals;
     }
 
+    let normalizedTransactionRows = 0;
+    if (await tableExists("fleet_transactions")) {
+      const txPeriodSql = month
+        ? "transaction_date >= ($2 || '-01')::date AND transaction_date < (($2 || '-01')::date + interval '1 month')"
+        : "transaction_date >= CURRENT_DATE - ($2::int * interval '1 day')";
+      const txPeriodValue: string | number = month ?? days;
+      const [txKpi, txTrend] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(*)::int AS normalized_transaction_rows,
+                  COUNT(DISTINCT COALESCE(NULLIF(driver_external_id,''),driver_name))::int AS total_drivers,
+                  COALESCE(SUM(trip_count),0)::int AS total_trips,
+                  COALESCE(SUM(gross_revenue),0)::numeric AS total_gross,
+                  COALESCE(SUM(incentive),0)::numeric AS total_incentive,
+                  COALESCE(SUM(commission),0)::numeric AS total_commission,
+                  COALESCE(SUM(deduction),0)::numeric AS total_deduction,
+                  COALESCE(SUM(net_revenue),0)::numeric AS total_net
+             FROM public.fleet_transactions
+            WHERE company_id=$1 AND ${txPeriodSql}`,
+          [cid, txPeriodValue],
+        ),
+        pool.query(
+          `SELECT transaction_date::text AS summary_date,
+                  COALESCE(SUM(net_revenue),0)::numeric AS net_revenue,
+                  COALESCE(SUM(gross_revenue),0)::numeric AS gross_revenue,
+                  COUNT(DISTINCT COALESCE(NULLIF(driver_external_id,''),driver_name))::int AS active_drivers,
+                  COALESCE(SUM(trip_count),0)::int AS total_trips
+             FROM public.fleet_transactions
+            WHERE company_id=$1 AND transaction_date IS NOT NULL AND ${txPeriodSql}
+            GROUP BY transaction_date
+            ORDER BY transaction_date`,
+          [cid, txPeriodValue],
+        ),
+      ]);
+      normalizedTransactionRows = Number(txKpi.rows[0]?.normalized_transaction_rows ?? 0);
+      if (normalizedTransactionRows > 0) {
+        kpi = {
+          ...kpi,
+          ...txKpi.rows[0],
+        };
+        trend = txTrend.rows;
+      }
+    }
+
     const importDate = await pool.query<{ uploaded_at: Date }>(
       `SELECT uploaded_at
          FROM public.fleet_outstanding_import_log
@@ -444,7 +517,16 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       outstanding: outstanding.rows[0] ?? { count: 0, total_amount: 0 },
       rawTotals,
       snapshotSummary,
-      dataSource: Number((rawTotals as Record<string, unknown>).raw_row_count ?? 0) > 0 ? "transactions" : "driver_snapshot",
+      dataSource: normalizedTransactionRows > 0
+        ? "normalized_transactions"
+        : Number((rawTotals as Record<string, unknown>).raw_row_count ?? 0) > 0
+          ? "raw_transactions"
+          : "driver_snapshot",
+      dataQuality: {
+        normalizedTransactionRows,
+        rawTransactionRows: Number((rawTotals as Record<string, unknown>).raw_row_count ?? 0),
+        tripMetricsAvailable: normalizedTransactionRows > 0,
+      },
       lastUploadDate,
     });
   } catch (error) {
@@ -806,6 +888,17 @@ router.post("/outstanding/snapshot/confirm", async (req: AdminRequest, res) => {
 });
 
 
+router.get("/wa/status", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const status = await getFleetWaGatewayStatus();
+    res.json({ ok: true, ...status });
+  } catch (error) {
+    req.log.error({ error }, "Fleet WA status failed");
+    res.status(503).json({ error: "Gagal mengambil status WA Gateway Fleet." });
+  }
+});
+
 router.post("/outstanding/:id/wa", async (req: AdminRequest, res) => {
   try {
     const cid=companyId(req);
@@ -910,13 +1003,35 @@ router.put("/outstanding/auto-blast-settings", async (req: AdminRequest, res) =>
     await ensureFleetTables();
     const cid=companyId(req);
     const enabled=req.body?.enabled===true||req.body?.enabled==="true";
-    const hour=Math.max(0,Math.min(23,Number(req.body?.hour??8)||8));
+    const rawHour=Number(req.body?.hour??8);
+    if(!Number.isInteger(rawHour)||rawHour<0||rawHour>23){
+      res.status(400).json({error:"Jam auto-blast wajib 0-23 WIB."});
+      return;
+    }
+    const hour=rawHour;
+    if(enabled){
+      const wa=await getFleetWaGatewayStatus();
+      const ready=Boolean(wa.configured&&wa.gatewayHealthy&&wa.deviceId&&wa.deviceStatus==="ONLINE");
+      if(!ready){
+        res.status(409).json({
+          error:`Auto-blast belum dapat diaktifkan. WA Fleet belum siap (gateway=${wa.gatewayStatus}, device=${wa.deviceId??"belum diset"}, status=${wa.deviceStatus??"UNKNOWN"}).`,
+          wa,
+        });
+        return;
+      }
+    }
     await pool.query(
       `INSERT INTO public.fleet_settings(company_id,auto_blast_enabled,auto_blast_hour,updated_at)
        VALUES($1,$2,$3,NOW())
        ON CONFLICT(company_id) DO UPDATE
          SET auto_blast_enabled=EXCLUDED.auto_blast_enabled,
              auto_blast_hour=EXCLUDED.auto_blast_hour,
+             auto_blast_last_run=CASE
+               WHEN fleet_settings.auto_blast_enabled IS DISTINCT FROM EXCLUDED.auto_blast_enabled
+                 OR fleet_settings.auto_blast_hour IS DISTINCT FROM EXCLUDED.auto_blast_hour
+               THEN NULL
+               ELSE fleet_settings.auto_blast_last_run
+             END,
              updated_at=NOW()`,
       [cid,enabled,hour],
     );
@@ -1040,6 +1155,15 @@ router.delete("/outstanding/:id", async (req: AdminRequest, res) => {
     await ensureFleetTables();
     const cid = companyId(req);
     const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Outstanding ID tidak valid." });
+      return;
+    }
+    const confirmation = requireDestructiveConfirmation(req, `DELETE OUTSTANDING ${id}`);
+    if (!confirmation.ok) {
+      res.status(confirmation.status).json({ error: confirmation.error });
+      return;
+    }
     const result = await pool.query(
       "DELETE FROM public.fleet_outstanding WHERE id=$1 AND company_id=$2 RETURNING id",
       [id, cid],
@@ -1967,8 +2091,25 @@ router.get("/executive-summary", async (req: AdminRequest, res) => {
 router.get("/settings", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
-    const settings = await getFleetAccountingSettings(cid);
-    res.json({ ok: true, ...settings, source: "central_finance" });
+    const [settings, reminder] = await Promise.all([
+      getFleetAccountingSettings(cid),
+      pool.query(
+        `SELECT auto_blast_enabled,auto_blast_hour,auto_blast_last_run
+           FROM public.fleet_settings
+          WHERE company_id=$1
+          LIMIT 1`,
+        [cid],
+      ),
+    ]);
+    const reminderRow = reminder.rows[0] ?? {};
+    res.json({
+      ok: true,
+      ...settings,
+      autoBlastEnabled: reminderRow.auto_blast_enabled === true,
+      autoBlastHour: Number(reminderRow.auto_blast_hour ?? 8),
+      autoBlastLastRun: reminderRow.auto_blast_last_run ?? null,
+      source: "central_finance",
+    });
   } catch (error) {
     req.log.error({ error }, "Fleet settings failed");
     const message = error instanceof Error ? error.message : "Gagal mengambil Fleet Accounting Settings.";
@@ -1979,9 +2120,10 @@ router.get("/settings", async (req: AdminRequest, res) => {
 router.put("/settings", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
-    const cashId = Number(req.body?.fleetCashAccountId);
-    const receivableId = Number(req.body?.fleetDriverReceivableAccountId);
-    const journalId = Number(req.body?.journalId);
+    const current = await getFleetAccountingSettings(cid);
+    const cashId = Number(req.body?.fleetCashAccountId ?? current.fleetCashAccountId);
+    const receivableId = Number(req.body?.fleetDriverReceivableAccountId ?? current.fleetDriverReceivableAccountId);
+    const journalId = Number(req.body?.journalId ?? current.journalId);
 
     if (
       !Number.isSafeInteger(cashId) || cashId <= 0 ||
@@ -2009,6 +2151,75 @@ router.put("/settings", async (req: AdminRequest, res) => {
         ? 409
         : 503,
     ).json({ error: message });
+  }
+});
+
+router.get("/reminder-settings", async (req: AdminRequest, res) => {
+  try {
+    const cid = companyId(req);
+    const result = await pool.query(
+      `SELECT auto_blast_enabled,auto_blast_hour,auto_blast_last_run
+         FROM public.fleet_settings
+        WHERE company_id=$1
+        LIMIT 1`,
+      [cid],
+    );
+    const row = result.rows[0] ?? {};
+    res.json({
+      ok: true,
+      autoBlastEnabled: row.auto_blast_enabled === true,
+      autoBlastHour: Number(row.auto_blast_hour ?? 8),
+      autoBlastLastRun: row.auto_blast_last_run ?? null,
+    });
+  } catch (error) {
+    req.log.error({ error }, "Fleet reminder settings failed");
+    res.status(503).json({ error: "Gagal mengambil pengaturan reminder Fleet." });
+  }
+});
+
+router.put("/reminder-settings", async (req: AdminRequest, res) => {
+  try {
+    const cid = companyId(req);
+    const enabled = req.body?.autoBlastEnabled === true;
+    const hour = Number(req.body?.autoBlastHour ?? 8);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      res.status(400).json({ error: "Jam reminder wajib 0-23 WIB." });
+      return;
+    }
+    if (enabled) {
+      const wa = await getFleetWaGatewayStatus();
+      const ready = Boolean(wa.configured && wa.gatewayHealthy && wa.deviceId && wa.deviceStatus === "ONLINE");
+      if (!ready) {
+        res.status(409).json({ error: "WA Fleet belum siap untuk auto reminder.", wa });
+        return;
+      }
+    }
+    const result = await pool.query(
+      `INSERT INTO public.fleet_settings(company_id,auto_blast_enabled,auto_blast_hour,updated_at)
+       VALUES($1,$2,$3,NOW())
+       ON CONFLICT(company_id) DO UPDATE SET
+         auto_blast_enabled=EXCLUDED.auto_blast_enabled,
+         auto_blast_hour=EXCLUDED.auto_blast_hour,
+         auto_blast_last_run=CASE
+           WHEN fleet_settings.auto_blast_enabled IS DISTINCT FROM EXCLUDED.auto_blast_enabled
+             OR fleet_settings.auto_blast_hour IS DISTINCT FROM EXCLUDED.auto_blast_hour
+           THEN NULL
+           ELSE fleet_settings.auto_blast_last_run
+         END,
+         updated_at=NOW()
+       RETURNING auto_blast_enabled,auto_blast_hour,auto_blast_last_run`,
+      [cid, enabled, hour],
+    );
+    const row = result.rows[0];
+    res.json({
+      ok: true,
+      autoBlastEnabled: row.auto_blast_enabled === true,
+      autoBlastHour: Number(row.auto_blast_hour),
+      autoBlastLastRun: row.auto_blast_last_run ?? null,
+    });
+  } catch (error) {
+    req.log.error({ error }, "Fleet reminder settings update failed");
+    res.status(503).json({ error: "Gagal menyimpan pengaturan reminder Fleet." });
   }
 });
 
@@ -2093,6 +2304,20 @@ router.post("/cash-payments", async (req: AdminRequest, res) => {
       : new Date().toISOString().slice(0,10);
     if(!driverName||!Number.isFinite(amount)||amount<=0){
       res.status(400).json({error:"Nama driver dan jumlah pembayaran wajib valid."});
+      return;
+    }
+
+    // Fail before creating a local payment when Central Finance posting is disabled
+    // or its canonical accounting settings cannot be reached. This avoids leaving
+    // a confirmed local payment that the user may accidentally submit again.
+    assertCentralFinanceWriteEnabled();
+    const canonicalSettings = await getFleetAccountingSettings(cid);
+    if (
+      !canonicalSettings.fleetCashAccountId ||
+      !canonicalSettings.fleetDriverReceivableAccountId ||
+      !canonicalSettings.journalId
+    ) {
+      res.status(409).json({ error: "Fleet Accounting Settings di Central Finance belum lengkap." });
       return;
     }
 
@@ -2383,6 +2608,9 @@ router.put("/expenses/:id", async (req: AdminRequest, res) => {
 router.delete("/expenses/:id", async (req: AdminRequest, res) => {
   try{
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Expense ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`DELETE EXPENSE ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     const result=await pool.query(
       "UPDATE public.fleet_expenses SET deleted_at=NOW(),updated_at=NOW() WHERE id=$1 AND company_id=$2 AND deleted_at IS NULL RETURNING id",
       [id,cid],
@@ -2454,6 +2682,9 @@ router.delete("/expenses/budgets/:id", async (req: AdminRequest, res) => {
   try{
     await ensureFleetOpsTables();
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Budget ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`DELETE BUDGET ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     const result=await pool.query("DELETE FROM public.fleet_expense_budgets WHERE id=$1 AND company_id=$2 RETURNING id",[id,cid]);
     if(result.rowCount!==1){res.status(404).json({error:"Anggaran tidak ditemukan."});return;}
     res.json({ok:true});

@@ -82,6 +82,24 @@ export default function DriverMacetPage() {
     refetchInterval: 5 * 60 * 1000,
   });
 
+  const { data: waStatus } = useQuery({
+    queryKey: ["fleet-wa-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/logistics/fleet/wa/status", { credentials: "include" });
+      const payload = await res.json().catch(() => ({})) as {
+        configured?: boolean;
+        gatewayHealthy?: boolean;
+        gatewayStatus?: string;
+        deviceId?: string | null;
+        deviceStatus?: string | null;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(payload.error ?? "Gagal mengambil status WA Gateway");
+      return payload;
+    },
+    refetchInterval: 30_000,
+  });
+
   const followupMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/logistics/fleet/outstanding/${followupId}/followup`, {
@@ -155,8 +173,10 @@ export default function DriverMacetPage() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/logistics/fleet/outstanding/${id}`, {
         method: "DELETE", credentials: "include",
+        headers: { "x-fleet-confirmation": `DELETE OUTSTANDING ${id}` },
       });
-      if (!res.ok) throw new Error("Gagal hapus data outstanding");
+      const payload = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Gagal hapus data outstanding");
     },
     onSuccess: () => {
       toast.success("Data outstanding berhasil dihapus");
@@ -173,8 +193,12 @@ export default function DriverMacetPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: reminderMsg, suppress_hours: parseInt(suppressHours) || 24 }),
       });
-      if (!res.ok) throw new Error("Gagal kirim WA reminder");
-      return res.json() as Promise<{ sent: number; failed: number; total: number; message: string }>;
+      const payload = await res.json().catch(() => ({})) as { sent?: number; failed?: number; total?: number; message?: string; error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Gagal kirim WA reminder");
+      if ((payload.sent ?? 0) === 0 && (payload.failed ?? 0) > 0) {
+        throw new Error(payload.error ?? payload.message ?? "Tidak ada WA yang berhasil dikirim. Periksa status device.");
+      }
+      return payload as { sent: number; failed: number; total: number; message: string };
     },
     onSuccess: (d) => {
       toast.success(`WA terkirim ke ${d.sent} driver${d.failed > 0 ? `, ${d.failed} gagal` : ""}`);
@@ -192,6 +216,12 @@ export default function DriverMacetPage() {
   const waReminderList = useMemo(
     () => allOpen.filter((r) => (parseFloat(String(r.outstanding_amount)) || 0) > MIN_WA_REMINDER && r.driver_phone),
     [allOpen]
+  );
+  const waReady = Boolean(
+    waStatus?.configured &&
+    waStatus?.gatewayHealthy &&
+    waStatus?.deviceId &&
+    waStatus?.deviceStatus === "ONLINE"
   );
 
   const filtered = useMemo(() => {
@@ -287,7 +317,7 @@ export default function DriverMacetPage() {
               size="sm"
               className="bg-green-700 hover:bg-green-600 text-white gap-1.5"
               onClick={() => setShowReminderDialog(true)}
-              disabled={waReminderList.length === 0}
+              disabled={waReminderList.length === 0 || !waReady}
             >
               <Send className="w-3.5 h-3.5" />
               WA Reminder Semua
@@ -319,6 +349,25 @@ export default function DriverMacetPage() {
             </Button>
           </div>
         </div>
+
+        <Card className={`${waReady
+          ? "bg-emerald-950/30 border-emerald-800/40"
+          : "bg-amber-950/30 border-amber-800/40"}`}>
+          <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium text-white">Status WA Gateway</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Gateway: {waStatus?.gatewayStatus ?? "Memeriksa…"}
+                {waStatus?.deviceId ? ` · Device: ${waStatus.deviceId} · ${waStatus.deviceStatus ?? "UNKNOWN"}` : " · Device Fleet belum dikonfigurasi"}
+              </p>
+            </div>
+            <Badge className={waReady
+              ? "bg-emerald-900/60 text-emerald-300 border-emerald-700"
+              : "bg-amber-900/60 text-amber-300 border-amber-700"}>
+              {waReady ? "Siap kirim" : "Perlu perhatian"}
+            </Badge>
+          </CardContent>
+        </Card>
 
         {/* Summary cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
