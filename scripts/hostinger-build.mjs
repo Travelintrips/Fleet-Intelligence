@@ -22,8 +22,7 @@ function run(command, args, cwd = root) {
 
 await run("npm", ["run", "typecheck"]);
 await run("npm", ["run", "test"]);
-await run("npm", ["run", "build", "-w", "@workspace/fleet-intelligence"]);
-await run("npm", ["run", "build", "-w", "@workspace/fleet-api"]);
+await run("npm", ["run", "build:workspace"]);
 
 const webDist = resolve(root, "apps/web/dist");
 const apiPublic = resolve(root, "apps/api/dist/public");
