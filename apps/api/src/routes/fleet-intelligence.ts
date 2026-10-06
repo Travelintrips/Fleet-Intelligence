@@ -97,28 +97,49 @@ function requireDestructiveConfirmation(
   return { ok: true };
 }
 
-function csvCells(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
+function csvRows(content: string): string[][] {
+  const input = content.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
   let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
+
+  const pushCell = () => {
+    row.push(cell.trim());
+    cell = "";
+  };
+  const pushRow = () => {
+    pushCell();
+    if (row.some((value) => value.trim() !== "")) rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
     if (ch === '"') {
-      if (quoted && line[i + 1] === '"') {
-        cur += '"';
+      if (quoted && input[i + 1] === '"') {
+        cell += '"';
         i += 1;
       } else {
         quoted = !quoted;
       }
-    } else if (ch === "," && !quoted) {
-      out.push(cur.trim());
-      cur = "";
-    } else {
-      cur += ch;
+      continue;
     }
+    if (ch === "," && !quoted) {
+      pushCell();
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !quoted) {
+      if (ch === "\r" && input[i + 1] === "\n") i += 1;
+      pushRow();
+      continue;
+    }
+    cell += ch;
   }
-  out.push(cur.trim());
-  return out;
+
+  if (cell.length || row.length) pushRow();
+  if (quoted) throw new Error("CSV memiliki kutip yang tidak tertutup.");
+  return rows;
 }
 
 function numberValue(value: unknown): number {
@@ -137,9 +158,9 @@ function cleanPhone(value: unknown): string {
 }
 
 function parseSnapshotCsv(content: string): Array<Omit<SnapshotRow, "match_status" | "matched_driver_id" | "matched_name">> {
-  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return [];
-  const headers = csvCells(lines[0]).map((h) => h.trim().toLowerCase());
+  const rows = csvRows(content);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
   const find = (...names: string[]) => headers.findIndex((h) => names.includes(h));
 
   const nameIdx = find("driver name", "driver_name", "nama driver", "nama");
@@ -153,8 +174,7 @@ function parseSnapshotCsv(content: string): Array<Omit<SnapshotRow, "match_statu
     throw new Error("CSV wajib memiliki kolom Driver Name dan Outstanding.");
   }
 
-  return lines.slice(1).map((line) => {
-    const cells = csvCells(line);
+  return rows.slice(1).map((cells) => {
     return {
       driver_name: String(cells[nameIdx] ?? "").trim(),
       phone_number: phoneIdx >= 0 ? cleanPhone(cells[phoneIdx]) : "",
@@ -182,9 +202,9 @@ type GojekTransactionRow = {
 };
 
 function parseGojekTransactionCsv(content: string) {
-  const lines=content.replace(/^\uFEFF/,"").split(/\r?\n/).filter(line=>line.trim());
-  if(lines.length<2) return {headers:[] as string[],rows:[] as GojekTransactionRow[],mapping:{} as Record<string,string|null>,warnings:["File tidak memiliki data."]};
-  const headers=csvCells(lines[0]).map(h=>h.trim());
+  const parsedRows=csvRows(content);
+  if(parsedRows.length<2) return {headers:[] as string[],rows:[] as GojekTransactionRow[],mapping:{} as Record<string,string|null>,warnings:["File tidak memiliki data."]};
+  const headers=parsedRows[0].map(h=>h.trim());
   const normalized=headers.map(h=>h.toLowerCase().replace(/[()]/g,"").replace(/[_-]+/g," ").replace(/\s+/g," ").trim());
   const find=(...names:string[])=>normalized.findIndex(h=>names.includes(h));
   const idx={
@@ -206,8 +226,8 @@ function parseGojekTransactionCsv(content: string) {
   const warnings:string[]=[];
   if(idx.gopayRef<0) warnings.push("GoPay Reference ID tidak ditemukan; dedup akan memakai fallback.");
   if(idx.driverExtId<0) warnings.push("Driver ID tidak ditemukan.");
-  const rows=lines.slice(1).map(line=>{
-    const cells=csvCells(line),raw:Record<string,string>={};
+  const rows=parsedRows.slice(1).map(cells=>{
+    const raw:Record<string,string>={};
     headers.forEach((h,i)=>{raw[h]=cells[i]??"";});
     const dateRaw=String(cells[idx.txDate>=0?idx.txDate:idx.simpleDate]??"").trim();
     let txDate="";
