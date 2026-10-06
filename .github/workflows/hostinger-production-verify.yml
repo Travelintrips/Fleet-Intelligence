@@ -68,6 +68,28 @@ jobs:
           console.log("fleet_production_readiness=PASS dependencies="+ready.dependencies);
           NODE
 
+      - name: Validate production integrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --http1.1 -L -sS -o /tmp/integrations -w "%{http_code}" \
+            --connect-timeout 10 --max-time 20 "$BASE_URL/api/integrationz" || true)
+          echo "integrationz_http=$code"
+          test "$code" = "200"
+          node - <<'NODE'
+          const fs = require("fs");
+          const payload = JSON.parse(fs.readFileSync("/tmp/integrations", "utf8"));
+          const wa = payload?.integrations?.wa ?? {};
+          if (wa.configured !== true) throw new Error("Fleet WA is not fully configured");
+          if (wa.gatewayHealthy !== true) throw new Error("Fleet WA gateway is not healthy");
+          if (wa.deviceOnline !== true) throw new Error(`Fleet WA device is not ONLINE (status=${wa.deviceStatus ?? "UNKNOWN"})`);
+          const finance = payload?.integrations?.centralFinance ?? {};
+          if (finance.baseUrlConfigured !== true || finance.tokenConfigured !== true) {
+            throw new Error("Central Finance integration is not fully configured");
+          }
+          console.log("fleet_integrations=PASS wa=ONLINE central_finance=CONFIGURED");
+          NODE
+
       - name: Verify unauthenticated Fleet API is protected
         shell: bash
         run: |
