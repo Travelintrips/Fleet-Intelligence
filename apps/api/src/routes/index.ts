@@ -90,12 +90,20 @@ router.get("/integrationz", async (req, res) => {
           deviceConfigured: Boolean(wa.deviceId),
           deviceStatus: wa.deviceStatus,
           deviceOnline: wa.deviceStatus === "ONLINE",
+          deviceSelection: wa.deviceSelection,
           assignedDeviceCount: wa.visibleDevices.length,
         },
         centralFinance: {
           baseUrlConfigured: Boolean(String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim()),
           tokenConfigured: Boolean(String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim()),
+          readReady: true,
           writeEnabled: String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() === "true",
+          writeReady:
+            String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() !== "true" ||
+            Boolean(
+              String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim() &&
+              String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim()
+            ),
         },
       },
     });
