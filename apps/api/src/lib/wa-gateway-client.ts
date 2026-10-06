@@ -17,7 +17,7 @@ export async function sendFleetWa(args: { phone: string; message: string; idempo
   const token = required(process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN, "CST_WA_GATEWAY_TOKEN");
   const phone = normalizeFleetPhone(args.phone);
   if (!phone) throw new Error("Nomor WhatsApp Fleet tidak valid.");
-  const deviceId = String(process.env.FLEET_WA_DEVICE_ID ?? "").trim();
+  const deviceId = required(process.env.FLEET_WA_DEVICE_ID, "FLEET_WA_DEVICE_ID");
 
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
@@ -82,7 +82,7 @@ export async function getFleetWaGatewayStatus() {
   }
 
   return {
-    configured: Boolean(baseUrl && (process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN)?.trim()),
+    configured: Boolean(baseUrl && (process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN)?.trim() && deviceId),
     gatewayHealthy,
     gatewayStatus,
     deviceId,
