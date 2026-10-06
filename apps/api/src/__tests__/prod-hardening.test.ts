@@ -59,5 +59,15 @@ describe("Fleet production hardening contract", () => {
     expect(waClient).toContain("/v1/devices");
     expect(waClient).toContain("TOKEN_FORBIDDEN");
     expect(waClient).toContain("NOT_ASSIGNED");
+    expect(waClient).toContain("single_online");
+    expect(waClient).toContain("AMBIGUOUS_ONLINE_DEVICES");
+  });
+
+  it("keeps Central Finance reads available while writes remain fail-closed", () => {
+    const finance = readFileSync(resolve(process.cwd(), "src/lib/central-finance-client.ts"), "utf8");
+    expect(finance).toContain("getFleetAccountingSettingsDirect");
+    expect(finance).toContain("if (cfg.writeEnabled)");
+    expect(finance).toContain("Central Finance service token wajib sebelum write diaktifkan.");
+    expect(finance).toContain("assertCentralFinanceWriteEnabled");
   });
 });
