@@ -1,3 +1,5 @@
+import { pool } from "./db";
+
 type Json = Record<string, unknown>;
 
 function required(value: unknown, name: string): string {
@@ -6,16 +8,22 @@ function required(value: unknown, name: string): string {
   return v;
 }
 
-function clientConfig() {
+function clientConfig(options: { requireToken?: boolean } = {}) {
+  const baseUrl = String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim().replace(/\/$/, "");
+  const token = String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim();
+  if (options.requireToken) {
+    required(baseUrl, "CENTRAL_FINANCE_BASE_URL");
+    required(token, "CENTRAL_FINANCE_SERVICE_TOKEN");
+  }
   return {
-    baseUrl: required(process.env.CENTRAL_FINANCE_BASE_URL, "CENTRAL_FINANCE_BASE_URL").replace(/\/$/, ""),
-    token: required(process.env.CENTRAL_FINANCE_SERVICE_TOKEN, "CENTRAL_FINANCE_SERVICE_TOKEN"),
+    baseUrl,
+    token,
     writeEnabled: String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() === "true",
   };
 }
 
 async function request(path: string, init: RequestInit = {}): Promise<Json> {
-  const cfg = clientConfig();
+  const cfg = clientConfig({ requireToken: true });
   const response = await fetch(`${cfg.baseUrl}${path}`, {
     ...init,
     headers: {
@@ -38,7 +46,44 @@ export function assertCentralFinanceWriteEnabled() {
   }
 }
 
+async function getFleetAccountingSettingsDirect(companyId: number) {
+  const result = await pool.query(
+    `SELECT s.fleet_cash_account_id,
+            s.fleet_driver_receivable_account_id,
+            COALESCE(
+              s.cash_journal_id,
+              s.bank_journal_id,
+              (SELECT id
+                 FROM public.accounting_journals j
+                WHERE j.company_id=$1
+                  AND COALESCE(j.is_active,true)=true
+                ORDER BY id
+                LIMIT 1)
+            ) AS journal_id
+       FROM public.accounting_settings s
+      WHERE s.company_id=$1
+      LIMIT 1`,
+    [companyId],
+  );
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  const fleetCashAccountId = Number(row?.fleet_cash_account_id) || null;
+  const fleetDriverReceivableAccountId = Number(row?.fleet_driver_receivable_account_id) || null;
+  const journalId = Number(row?.journal_id) || null;
+  if (!fleetCashAccountId || !fleetDriverReceivableAccountId || !journalId) {
+    throw new Error("Fleet Cash Payment COA/journal belum dikonfigurasi.");
+  }
+  return { fleetCashAccountId, fleetDriverReceivableAccountId, journalId };
+}
+
 export async function getFleetAccountingSettings(companyId: number) {
+  const cfg = clientConfig();
+  if (!cfg.baseUrl || !cfg.token) {
+    if (cfg.writeEnabled) {
+      throw new Error("Central Finance service token wajib sebelum write diaktifkan.");
+    }
+    return getFleetAccountingSettingsDirect(companyId);
+  }
+
   const result = await request(`/api/integrations/fleet/companies/${encodeURIComponent(companyId)}/accounting-settings`);
   return {
     fleetCashAccountId: Number(result.fleetCashAccountId) || null,
