@@ -32,7 +32,7 @@ async function request(path: string, init: RequestInit = {}): Promise<Json> {
   return payload;
 }
 
-function assertWriteEnabled() {
+export function assertCentralFinanceWriteEnabled() {
   if (String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() !== "true") {
     throw new Error("Posting Central Finance dari Fleet belum diaktifkan.");
   }
@@ -53,7 +53,7 @@ export async function updateFleetAccountingSettings(args: {
   fleetDriverReceivableAccountId: number;
   journalId: number;
 }) {
-  assertWriteEnabled();
+  assertCentralFinanceWriteEnabled();
   const key = `fleet-accounting-settings:${args.companyId}:${args.fleetCashAccountId}:${args.fleetDriverReceivableAccountId}:${args.journalId}`;
   const result = await request(
     `/api/integrations/fleet/companies/${encodeURIComponent(args.companyId)}/accounting-settings`,
@@ -79,7 +79,7 @@ export async function postFleetCashPayment(args: {
   referenceNo?: string | null;
   actor?: string | null;
 }) {
-  assertWriteEnabled();
+  assertCentralFinanceWriteEnabled();
   const key = `fleet-cash-payment:${args.companyId}:${args.paymentId}`;
   const result = await request("/api/integrations/fleet/cash-payments", {
     method: "POST",
@@ -99,7 +99,7 @@ export async function reverseFleetCashPayment(args: {
   driverName: string;
   actor?: string | null;
 }) {
-  assertWriteEnabled();
+  assertCentralFinanceWriteEnabled();
   const key = `fleet-cash-payment-reversal:${args.companyId}:${args.paymentId}:${args.originalEntryId}`;
   const result = await request("/api/integrations/fleet/cash-payments/reverse", {
     method: "POST",
