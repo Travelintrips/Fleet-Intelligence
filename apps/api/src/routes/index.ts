@@ -3,6 +3,7 @@ import fleetIntelligenceRouter from "./fleet-intelligence";
 import localProductionAuthRouter from "./local-production-auth";
 import { createDevAuthRouter } from "./dev-auth";
 import { pool } from "../lib/db";
+import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
 
 const router: IRouter = Router();
 
@@ -71,6 +72,39 @@ router.get("/readyz", async (req, res) => {
       status: "not_ready",
       service: "fleet-intelligence-api",
       reason: "database_unavailable",
+    });
+  }
+});
+
+router.get("/integrationz", async (req, res) => {
+  try {
+    const wa = await getFleetWaGatewayStatus();
+    res.json({
+      status: "ok",
+      service: "fleet-intelligence-api",
+      integrations: {
+        wa: {
+          configured: wa.configured,
+          gatewayHealthy: wa.gatewayHealthy,
+          gatewayStatus: wa.gatewayStatus,
+          deviceConfigured: Boolean(wa.deviceId),
+          deviceStatus: wa.deviceStatus,
+          deviceOnline: wa.deviceStatus === "ONLINE",
+          assignedDeviceCount: wa.visibleDevices.length,
+        },
+        centralFinance: {
+          baseUrlConfigured: Boolean(String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim()),
+          tokenConfigured: Boolean(String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim()),
+          writeEnabled: String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() === "true",
+        },
+      },
+    });
+  } catch (error) {
+    req.log.error({ error }, "Fleet integration status failed");
+    res.status(503).json({
+      status: "degraded",
+      service: "fleet-intelligence-api",
+      reason: "integration_status_unavailable",
     });
   }
 });
