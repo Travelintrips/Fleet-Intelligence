@@ -56,6 +56,8 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain('router.get("/wa/status"');
     expect(waClient).toContain("getFleetWaGatewayStatus");
     expect(waClient).toContain("/health");
-    expect(waClient).toContain("/status");
+    expect(waClient).toContain("/v1/devices");
+    expect(waClient).toContain("TOKEN_FORBIDDEN");
+    expect(waClient).toContain("NOT_ASSIGNED");
   });
 });
