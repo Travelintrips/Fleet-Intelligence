@@ -104,10 +104,16 @@ jobs:
           if (wa.gatewayHealthy !== true) throw new Error("Fleet WA gateway is not healthy");
           if (wa.deviceOnline !== true) throw new Error(`Fleet WA device is not ONLINE (status=${wa.deviceStatus ?? "UNKNOWN"})`);
           const finance = payload?.integrations?.centralFinance ?? {};
-          if (finance.baseUrlConfigured !== true || finance.tokenConfigured !== true) {
-            throw new Error("Central Finance integration is not fully configured");
+          if (finance.readReady !== true) {
+            throw new Error("Central Finance read path is not ready");
           }
-          console.log("fleet_integrations=PASS wa=ONLINE central_finance=CONFIGURED");
+          if (finance.writeReady !== true) {
+            throw new Error("Central Finance write path is enabled without complete service credentials");
+          }
+          console.log(
+            "fleet_integrations=PASS wa=ONLINE central_finance_read=READY central_finance_write="+
+            (finance.writeEnabled === true ? "ENABLED" : "DISABLED_SAFE")
+          );
           NODE
 
       - name: Verify unauthenticated Fleet API is protected
