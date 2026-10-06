@@ -1002,13 +1002,35 @@ router.put("/outstanding/auto-blast-settings", async (req: AdminRequest, res) =>
     await ensureFleetTables();
     const cid=companyId(req);
     const enabled=req.body?.enabled===true||req.body?.enabled==="true";
-    const hour=Math.max(0,Math.min(23,Number(req.body?.hour??8)||8));
+    const rawHour=Number(req.body?.hour??8);
+    if(!Number.isInteger(rawHour)||rawHour<0||rawHour>23){
+      res.status(400).json({error:"Jam auto-blast wajib 0-23 WIB."});
+      return;
+    }
+    const hour=rawHour;
+    if(enabled){
+      const wa=await getFleetWaGatewayStatus();
+      const ready=Boolean(wa.configured&&wa.gatewayHealthy&&wa.deviceId&&wa.deviceStatus==="ONLINE");
+      if(!ready){
+        res.status(409).json({
+          error:`Auto-blast belum dapat diaktifkan. WA Fleet belum siap (gateway=${wa.gatewayStatus}, device=${wa.deviceId??"belum diset"}, status=${wa.deviceStatus??"UNKNOWN"}).`,
+          wa,
+        });
+        return;
+      }
+    }
     await pool.query(
       `INSERT INTO public.fleet_settings(company_id,auto_blast_enabled,auto_blast_hour,updated_at)
        VALUES($1,$2,$3,NOW())
        ON CONFLICT(company_id) DO UPDATE
          SET auto_blast_enabled=EXCLUDED.auto_blast_enabled,
              auto_blast_hour=EXCLUDED.auto_blast_hour,
+             auto_blast_last_run=CASE
+               WHEN fleet_settings.auto_blast_enabled IS DISTINCT FROM EXCLUDED.auto_blast_enabled
+                 OR fleet_settings.auto_blast_hour IS DISTINCT FROM EXCLUDED.auto_blast_hour
+               THEN NULL
+               ELSE fleet_settings.auto_blast_last_run
+             END,
              updated_at=NOW()`,
       [cid,enabled,hour],
     );
@@ -2162,6 +2184,14 @@ router.put("/reminder-settings", async (req: AdminRequest, res) => {
     if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
       res.status(400).json({ error: "Jam reminder wajib 0-23 WIB." });
       return;
+    }
+    if (enabled) {
+      const wa = await getFleetWaGatewayStatus();
+      const ready = Boolean(wa.configured && wa.gatewayHealthy && wa.deviceId && wa.deviceStatus === "ONLINE");
+      if (!ready) {
+        res.status(409).json({ error: "WA Fleet belum siap untuk auto reminder.", wa });
+        return;
+      }
     }
     const result = await pool.query(
       `INSERT INTO public.fleet_settings(company_id,auto_blast_enabled,auto_blast_hour,updated_at)
