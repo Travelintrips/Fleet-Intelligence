@@ -2563,6 +2563,9 @@ router.put("/expenses/:id", async (req: AdminRequest, res) => {
 router.delete("/expenses/:id", async (req: AdminRequest, res) => {
   try{
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Expense ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`DELETE EXPENSE ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     const result=await pool.query(
       "UPDATE public.fleet_expenses SET deleted_at=NOW(),updated_at=NOW() WHERE id=$1 AND company_id=$2 AND deleted_at IS NULL RETURNING id",
       [id,cid],
@@ -2634,6 +2637,9 @@ router.delete("/expenses/budgets/:id", async (req: AdminRequest, res) => {
   try{
     await ensureFleetOpsTables();
     const cid=companyId(req),id=Number(req.params.id);
+    if(!Number.isSafeInteger(id)||id<=0){res.status(400).json({error:"Budget ID tidak valid."});return;}
+    const confirmation=requireDestructiveConfirmation(req,`DELETE BUDGET ${id}`);
+    if(!confirmation.ok){res.status(confirmation.status).json({error:confirmation.error});return;}
     const result=await pool.query("DELETE FROM public.fleet_expense_budgets WHERE id=$1 AND company_id=$2 RETURNING id",[id,cid]);
     if(result.rowCount!==1){res.status(404).json({error:"Anggaran tidak ditemukan."});return;}
     res.json({ok:true});
