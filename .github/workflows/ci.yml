@@ -35,6 +35,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify Hostinger bundle
+        run: |
+          test -f apps/api/dist/index.mjs
+          test -f apps/api/dist/public/index.html
+
       - name: Docker build API
         run: docker build -t fleet-api-ci apps/api
 
