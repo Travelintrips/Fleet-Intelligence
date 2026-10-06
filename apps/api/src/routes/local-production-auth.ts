@@ -119,27 +119,12 @@ function isValidEmail(value: string): boolean {
 }
 
 async function ensureEmailOtpTable(): Promise<void> {
-  await pool.query(`
-    create table if not exists public.bizportal_email_otp_codes (
-      id bigserial primary key,
-      email text not null,
-      request_ip text not null,
-      purpose text not null,
-      code_hash text,
-      attempts integer not null default 0,
-      expires_at timestamptz not null,
-      verified_at timestamptz,
-      created_at timestamptz not null default now()
-    )
-  `);
-  await pool.query(`
-    create index if not exists bizportal_email_otp_rate_idx
-      on public.bizportal_email_otp_codes (email, request_ip, created_at desc)
-  `);
-  await pool.query(`
-    create index if not exists bizportal_email_otp_lookup_idx
-      on public.bizportal_email_otp_codes (email, purpose, created_at desc)
-  `);
+  const result = await pool.query<{ exists: boolean }>(
+    "select to_regclass('public.bizportal_email_otp_codes') is not null as exists",
+  );
+  if (result.rows[0]?.exists !== true) {
+    throw new Error("Tabel bizportal_email_otp_codes belum tersedia. Jalankan migration sebelum production.");
+  }
 }
 
 async function countRecentEmailOtpRequests(email: string, requestIp: string): Promise<number> {
