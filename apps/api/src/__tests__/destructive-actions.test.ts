@@ -13,6 +13,15 @@ describe("Fleet destructive action safety", () => {
     expect(fleetRoute).toContain("requireDestructiveConfirmation(req,`DELETE REPORT ${id}`)");
   });
 
+  it("requires explicit confirmation for outstanding deletion", () => {
+    expect(fleetRoute).toContain("requireDestructiveConfirmation(req,`DELETE OUTSTANDING ${id}`)");
+  });
+
+  it("requires explicit confirmation for expense and budget deletion", () => {
+    expect(fleetRoute).toContain("requireDestructiveConfirmation(req,`DELETE EXPENSE ${id}`)");
+    expect(fleetRoute).toContain("requireDestructiveConfirmation(req,`DELETE BUDGET ${id}`)");
+  });
+
   it("restricts purge-all to owner/super_admin and company-scoped confirmation", () => {
     expect(fleetRoute).toContain("PURGE ALL FLEET DATA COMPANY");
     expect(fleetRoute).toContain("{ownerOnly:true}");
