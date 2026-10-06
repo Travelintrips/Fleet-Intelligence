@@ -21,7 +21,7 @@ function run(command, args, cwd = root) {
 }
 
 await run("npm", ["run", "typecheck"]);
-await run("npm", ["run", "test", "--", "--run"]);
+await run("npm", ["run", "test"]);
 await run("npm", ["run", "build", "-w", "@workspace/fleet-intelligence"]);
 await run("npm", ["run", "build", "-w", "@workspace/fleet-api"]);
 
