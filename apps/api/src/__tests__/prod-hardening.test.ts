@@ -32,6 +32,12 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain("requireDestructiveConfirmation");
   });
 
+  it("parses quoted multiline CSV fields instead of splitting by physical line", () => {
+    expect(route).toContain("function csvRows(content: string)");
+    expect(route).toContain('if ((ch === "\\n" || ch === "\\r") && !quoted)');
+    expect(route).toContain('CSV memiliki kutip yang tidak tertutup.');
+  });
+
   it("uses the strictly above Rp50k WA reminder threshold", () => {
     const reminder = readFileSync(resolve(process.cwd(), "src/lib/fleet-wa-reminder.ts"), "utf8");
     expect(reminder).toContain("o.outstanding_amount > $3");
