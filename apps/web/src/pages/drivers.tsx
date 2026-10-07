@@ -171,8 +171,8 @@ export default function FleetDriversPage() {
                             <td className="px-4 py-3 text-slate-300 font-mono text-xs whitespace-nowrap">{String(d.vehicle_plate ?? "—")}</td>
                             <td className="px-4 py-3 text-right text-slate-300 tabular-nums whitespace-nowrap">{fmtIdr(d.rental_fee_daily)}</td>
                             <td className="px-4 py-3 text-slate-300 text-xs whitespace-nowrap">{ownershipLabel(d.vehicle_ownership)}</td>
-                            <td className="px-4 py-3">
-                              <Badge className={`border text-xs ${meta.cls}`}>
+                            <td className="px-4 py-3 min-w-[190px]">
+                              <Badge className={`inline-flex min-w-[150px] justify-center whitespace-nowrap border px-2.5 py-1 text-xs font-medium ${meta.cls}`}>
                                 {meta.label}
                               </Badge>
                             </td>
