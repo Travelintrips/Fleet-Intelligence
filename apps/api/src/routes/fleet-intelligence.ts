@@ -53,13 +53,21 @@ router.post("/gojek-connector/handoff", async (req, res) => {
       return;
     }
 
-    const result = await importGojekConnectorCsv({
-      companyId: cfg.companyId,
-      content,
-      fileName,
-      actor: "gojek-connector",
-    });
-    res.status(201).json({ ok: true, ...result });
+    const exportType = detectGojekExportType(content);
+    const result = exportType === "driver_snapshot"
+      ? await importDriverSnapshotConnectorCsv({
+          companyId: cfg.companyId,
+          content,
+          fileName,
+          actor: "gojek-watcher",
+        })
+      : await importGojekConnectorCsv({
+          companyId: cfg.companyId,
+          content,
+          fileName,
+          actor: "gojek-watcher",
+        });
+    res.status(201).json({ ok: true, exportType, ...result });
   } catch (error) {
     req.log.error({ error }, "Gojek connector handoff failed");
     const message = error instanceof Error ? error.message : "Gagal memproses export Gojek.";
@@ -477,6 +485,70 @@ async function importGojekConnectorCsv(args: {
   } finally {
     client.release();
   }
+}
+
+
+async function importDriverSnapshotConnectorCsv(args: {
+  companyId: number;
+  content: string;
+  fileName: string;
+  actor: string;
+}) {
+  const rows = parseSnapshotCsv(args.content);
+  const prepared = rows
+    .map((row) => {
+      const driverName = String(row.driver_name ?? "").trim();
+      if (!driverName) return null;
+      const phone = cleanPhone(row.phone_number);
+      const plate = String(row.license_plate ?? "").trim().toUpperCase();
+      const fee = numberValue(row.rental_fee_daily);
+      const outstanding = numberValue(row.outstanding);
+      const classification = classifyDriver({
+        ...row,
+        license_plate: plate,
+        rental_fee_daily: fee,
+      });
+      return {
+        driver_name: driverName,
+        phone_number: phone,
+        license_plate: plate,
+        rental_fee_daily: fee,
+        outstanding,
+        internal_status: classification.internalStatus,
+        applicator_status: classification.applicatorStatus,
+        vehicle_ownership: classification.vehicleOwnership,
+      };
+    })
+    .filter((row) => row !== null);
+
+  if (!prepared.length) throw new Error("CSV Drivers tidak memiliki baris valid.");
+
+  const result = await pool.query<{ result: Record<string, unknown> }>(
+    `SELECT public.fleet_import_driver_snapshot($1,$2,$3,$4::jsonb) AS result`,
+    [args.companyId, args.fileName, args.actor, JSON.stringify(prepared)],
+  );
+  const payload = result.rows[0]?.result;
+  if (!payload) throw new Error("Import Drivers selesai tanpa hasil.");
+  return {
+    type: "driver_snapshot",
+    fileName: args.fileName,
+    ...payload,
+    fileRetained: false,
+  };
+}
+
+function detectGojekExportType(content: string): "driver_snapshot" | "transactions" {
+  const header = content.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0]?.toLowerCase() ?? "";
+  const driverColumns = [
+    "driver name",
+    "phone number",
+    "license plate",
+    "rental fee",
+    "outstanding",
+    "status",
+  ];
+  const isDriverSnapshot = driverColumns.every((column) => header.includes(column));
+  return isDriverSnapshot ? "driver_snapshot" : "transactions";
 }
 
 async function assertFleetSchemaTables(names: string[]): Promise<void> {
