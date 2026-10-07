@@ -40,30 +40,53 @@ jobs:
           done
           [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
 
-      - name: Configure SSH
-        shell: bash
-        run: |
-          set -euo pipefail
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Diagnose SSH connectivity
+      - name: Configure and diagnose SSH
         shell: bash
         run: |
           set +e
-          ssh -vvv -o BatchMode=yes -o ConnectTimeout=10 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo SSH_OK"             > /tmp/ssh-test.out 2> /tmp/ssh-test.err
-          code=$?
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
           {
-            echo "exit_code=$code"
-            echo "--- stdout ---"
-            cat /tmp/ssh-test.out
-            echo "--- stderr ---"
-            sed -E 's/(BEGIN|END) OPENSSH PRIVATE KEY/REDACTED/g' /tmp/ssh-test.err
+            echo "host=$SSH_HOST"
+            echo "port=$SSH_PORT"
+            echo "user=$SSH_USER"
+            echo
+            echo "== private key validation =="
           } > /tmp/ssh-diagnostic.txt
-          exit $code
+
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/tmp/ssh-derived-pub 2>/tmp/ssh-key.err
+          key_code=$?
+          echo "private_key_valid=$([ $key_code -eq 0 ] && echo yes || echo no)" >> /tmp/ssh-diagnostic.txt
+          if [ $key_code -ne 0 ]; then
+            cat /tmp/ssh-key.err >> /tmp/ssh-diagnostic.txt
+          else
+            echo "derived_public_key_fingerprint:" >> /tmp/ssh-diagnostic.txt
+            ssh-keygen -lf /tmp/ssh-derived-pub >> /tmp/ssh-diagnostic.txt 2>&1
+          fi
+
+          echo >> /tmp/ssh-diagnostic.txt
+          echo "== ssh-keyscan ==" >> /tmp/ssh-diagnostic.txt
+          ssh-keyscan -T 10 -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts 2>/tmp/keyscan.err
+          scan_code=$?
+          echo "keyscan_exit=$scan_code" >> /tmp/ssh-diagnostic.txt
+          cat /tmp/keyscan.err >> /tmp/ssh-diagnostic.txt
+          chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
+
+          echo >> /tmp/ssh-diagnostic.txt
+          echo "== ssh login ==" >> /tmp/ssh-diagnostic.txt
+          ssh -vv             -o BatchMode=yes             -o ConnectTimeout=10             -o StrictHostKeyChecking=accept-new             -i ~/.ssh/id_ed25519             -p "$SSH_PORT"             "$SSH_USER@$SSH_HOST" "echo SSH_OK"             >/tmp/ssh-test.out 2>/tmp/ssh-test.err
+          ssh_code=$?
+          echo "ssh_exit=$ssh_code" >> /tmp/ssh-diagnostic.txt
+          echo "--- stdout ---" >> /tmp/ssh-diagnostic.txt
+          cat /tmp/ssh-test.out >> /tmp/ssh-diagnostic.txt
+          echo "--- stderr ---" >> /tmp/ssh-diagnostic.txt
+          sed -E 's/(BEGIN|END) OPENSSH PRIVATE KEY/REDACTED/g' /tmp/ssh-test.err >> /tmp/ssh-diagnostic.txt
+
+          if [ $key_code -ne 0 ] || [ $scan_code -ne 0 ] || [ $ssh_code -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Upload SSH diagnostic
         if: always()
