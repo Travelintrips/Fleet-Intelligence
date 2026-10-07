@@ -23,3 +23,6 @@ The connector does not store Gojek username/password. It requests them at runtim
 - POST /sync/drivers with Authorization: Bearer <GOJEK_SERVER_CONNECTOR_TOKEN>
 
 If Gojek presents OTP/CAPTCHA/additional verification, the sync fails safely instead of bypassing it.
+
+
+<!-- Deployment trigger marker: server connector SSH diagnostics -->
