@@ -151,7 +151,7 @@ export async function sendFleetOutstandingReminders(args: {
         AND d.company_id=o.company_id::text
       WHERE o.company_id=$1
         AND o.status='open'
-        AND o.outstanding_amount > $3
+        AND o.outstanding_amount >= $3
         AND d.status='active'
         AND COALESCE(d.source_present_in_latest_snapshot,true)=true
         ${idFilter}
