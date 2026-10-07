@@ -99,6 +99,14 @@ describe("Fleet production hardening contract", () => {
     expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
+  it("proxies Gojek server connector status and drivers sync without exposing service token", () => {
+    expect(route).toContain('router.get("/gojek-connector/server-status"');
+    expect(route).toContain('router.post("/gojek-connector/server-sync/drivers"');
+    expect(route).toContain("GOJEK_SERVER_CONNECTOR_URL");
+    expect(route).toContain("GOJEK_SERVER_CONNECTOR_TOKEN");
+    expect(route).toContain("Authorization:");
+  });
+
   it("provides a non-mutating authenticated Gojek connector dry-run", () => {
     expect(route).toContain('router.post("/gojek-connector/dry-run"');
     expect(route).toContain("persisted: false");
