@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { execFileSync } from "node:child_process";
 
 function required(name) {
   const value = String(process.env[name] ?? "").trim();
@@ -19,6 +20,36 @@ if (parsedPortal.protocol !== "https:" || parsedPortal.hostname !== allowedHost)
 
 const fleetBaseUrl = required("FLEET_BASE_URL").replace(/\/$/, "");
 const sharedSecret = required("GOJEK_CONNECTOR_SHARED_SECRET");
+
+function loadLocalGojekCredentials() {
+  if (process.platform !== "win32") return null;
+  try {
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      "$p=Join-Path $env:LOCALAPPDATA 'CSTFleet\\gojek-credentials.json'",
+      "if(-not (Test-Path $p)){ exit 3 }",
+      "$j=Get-Content -Raw $p | ConvertFrom-Json",
+      "$s=ConvertTo-SecureString $j.password",
+      "$b=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)",
+      "try { $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }",
+      "[Console]::Out.Write(($j.email + [char]10 + $plain))"
+    ].join("; ");
+    const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trimEnd();
+    const idx = out.indexOf("\n");
+    if (idx < 1) return null;
+    const email = out.slice(0, idx).trim();
+    const password = out.slice(idx + 1);
+    return email && password ? { email, password } : null;
+  } catch {
+    return null;
+  }
+}
+
+const localCredentials = loadLocalGojekCredentials();
 const maxFileMb = Math.min(Math.max(Number(process.env.GOJEK_CONNECTOR_MAX_FILE_MB ?? 10) || 10, 1), 12);
 const controlPort = Math.min(Math.max(Number(process.env.GOJEK_BRIDGE_CONTROL_PORT ?? 17891) || 17891, 1024), 65535);
 const tempDir = await mkdtemp(path.join(os.tmpdir(), "cst-gojek-export-"));
@@ -41,6 +72,36 @@ const context = await browser.newContext({
 
 let page = await context.newPage();
 
+async function maybeAutoLogin(targetPage) {
+  if (!localCredentials) return false;
+
+  const email = targetPage.locator(
+    'input[type="email"], input[name*="email" i], input[autocomplete="username"]'
+  ).first();
+  const password = targetPage.locator(
+    'input[type="password"], input[name*="password" i], input[autocomplete="current-password"]'
+  ).first();
+
+  const emailVisible = await email.isVisible().catch(() => false);
+  const passwordVisible = await password.isVisible().catch(() => false);
+  if (!emailVisible || !passwordVisible) return false;
+
+  await email.fill(localCredentials.email);
+  await password.fill(localCredentials.password);
+
+  const submit = targetPage.locator(
+    'button[type="submit"], input[type="submit"], button:has-text("Login"), button:has-text("Masuk"), button:has-text("Sign in")'
+  ).first();
+
+  if (await submit.isVisible().catch(() => false)) {
+    await submit.click();
+    console.log("Login form diisi dan dikirim menggunakan credential lokal terenkripsi.");
+  } else {
+    console.log("Credential sudah diisi. Tombol login tidak dikenali; silakan klik manual.");
+  }
+  return true;
+}
+
 async function ensurePortalOpen() {
   if (page.isClosed()) page = await context.newPage();
   await page.bringToFront();
@@ -48,6 +109,10 @@ async function ensurePortalOpen() {
   if (!current || current === "about:blank" || !current.startsWith("https://fleetpartner.gojek.com")) {
     await page.goto(portalUrl, { waitUntil: "domcontentloaded" });
   }
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  await maybeAutoLogin(page).catch((error) => {
+    console.warn("Autofill login tidak berhasil:", error instanceof Error ? error.message : error);
+  });
 }
 
 async function handoffDownload(download) {
@@ -158,7 +223,7 @@ await ensurePortalOpen();
 
 console.log("");
 console.log("Browser sudah dibuka.");
-console.log("1. Login ke Fleet Partner secara normal.");
+console.log(localCredentials ? "1. Login akan dicoba otomatis dari credential lokal terenkripsi." : "1. Login ke Fleet Partner secara normal.");
 console.log("2. Pilih report yang dibutuhkan.");
 console.log("3. Klik tombol Export/Download resmi.");
 console.log("4. Bridge akan menangkap file sementara, mengirimnya ke CST Fleet, lalu menghapusnya.");
