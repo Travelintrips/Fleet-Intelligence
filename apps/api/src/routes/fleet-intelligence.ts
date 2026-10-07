@@ -2050,7 +2050,32 @@ router.get("/system-overview", async (req: AdminRequest, res) => {
       otherUnread = Number((a.rows[0] as Record<string, unknown>)?.other ?? 0);
     }
 
-    const healthScore = Math.max(0, 100 - Math.min(50, dlq * 5) - Math.min(30, criticalUnread * 10));
+    const wa = await getFleetWaGatewayStatus().catch(() => null);
+    const reminderState = await pool.query(
+      `SELECT s.auto_blast_enabled,s.auto_blast_hour,s.auto_blast_last_run,
+              w.last_tick_at,w.last_attempt_at,w.last_success_at,w.sender_device,w.device_status,w.last_error
+         FROM public.fleet_settings s
+         LEFT JOIN public.fleet_wa_worker_state w ON w.company_id=s.company_id
+        WHERE s.company_id=$1
+        LIMIT 1`,
+      [cid],
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+    const reminderRow = (reminderState.rows[0] ?? {}) as Record<string, unknown>;
+    const waReady = Boolean(
+      wa?.configured &&
+      wa?.gatewayHealthy &&
+      wa?.deviceId &&
+      wa?.deviceStatus === "ONLINE"
+    );
+
+    const healthScore = Math.max(
+      0,
+      100
+        - Math.min(50, dlq * 5)
+        - Math.min(30, criticalUnread * 10)
+        - (waReady ? 0 : 15)
+        - (reminderRow.auto_blast_enabled === true && reminderRow.last_error ? 10 : 0),
+    );
     const healthStatus = healthScore >= 80 ? "green" : healthScore >= 50 ? "yellow" : "red";
     res.json({
       generatedAt: new Date().toISOString(),
@@ -2071,6 +2096,31 @@ router.get("/system-overview", async (req: AdminRequest, res) => {
       alerts: { criticalUnread, otherUnread, totalUnread: criticalUnread + otherUnread },
       transactions: { total: tx, todayCount: txToday, totalGross, latestDate },
       drivers: { total: drivers, active: activeDrivers, suspended: suspendedDrivers },
+      wa: {
+        configured: Boolean(wa?.configured),
+        gatewayHealthy: Boolean(wa?.gatewayHealthy),
+        gatewayStatus: wa?.gatewayStatus ?? "UNREACHABLE",
+        deviceId: wa?.deviceId ?? null,
+        deviceStatus: wa?.deviceStatus ?? null,
+        ready: waReady,
+      },
+      reminder: {
+        enabled: reminderRow.auto_blast_enabled === true,
+        hourWib: Number(reminderRow.auto_blast_hour ?? 8),
+        lastRun: reminderRow.auto_blast_last_run ?? null,
+        lastTick: reminderRow.last_tick_at ?? null,
+        lastAttempt: reminderRow.last_attempt_at ?? null,
+        lastSuccess: reminderRow.last_success_at ?? null,
+        senderDevice: reminderRow.sender_device ?? null,
+        deviceStatus: reminderRow.device_status ?? null,
+        lastError: reminderRow.last_error ?? null,
+      },
+      dataSource: {
+        reports,
+        rawRows: raw,
+        normalizedRows: tx,
+        state: tx > 0 ? "normalized" : raw > 0 ? "raw_only" : "no_source_data",
+      },
       tables: { reports, raw, tx, drivers, vehicles, outstanding, alerts },
     });
   } catch (error) {
