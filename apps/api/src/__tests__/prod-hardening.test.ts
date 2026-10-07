@@ -99,6 +99,14 @@ describe("Fleet production hardening contract", () => {
     expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
+  it("exposes Gojek login only to authenticated bridge runtime", () => {
+    expect(route).toContain('router.get("/gojek-connector/runtime-credentials"');
+    expect(route).toContain("x-gojek-connector-secret");
+    expect(route).toContain("Cache-Control");
+    expect(route).toContain("GOJEK_LOGIN_EMAIL");
+    expect(route).toContain("GOJEK_LOGIN_PASSWORD");
+  });
+
   it("provides a guarded Gojek connector handoff without storing credentials", () => {
     expect(route).toContain('router.post("/gojek-connector/handoff"');
     expect(route).toContain("x-gojek-connector-secret");
