@@ -4,6 +4,7 @@ import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
+import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -1796,6 +1797,7 @@ router.get("/alerts", async (req: AdminRequest, res) => {
       res.json({ alerts: [], unreadCount: 0 });
       return;
     }
+    await syncFleetAlertsForCompany(cid);
     const isRead = typeof req.query.isRead === "string" && req.query.isRead !== "all" ? req.query.isRead : "";
     const severity = typeof req.query.severity === "string" && req.query.severity !== "all" ? req.query.severity : "";
     const page = Math.max(Number(req.query.page) || 1, 1);
@@ -1803,15 +1805,20 @@ router.get("/alerts", async (req: AdminRequest, res) => {
     const offset = (page - 1) * limit;
     const [rows, unread] = await Promise.all([
       pool.query(
-        `SELECT * FROM public.fleet_alerts
-          WHERE company_id=$1
-            AND ($2='' OR is_read=$2::boolean)
-            AND ($3='' OR severity=$3)
-          ORDER BY created_at DESC LIMIT $4 OFFSET $5`,
+        `SELECT a.*, d.full_name AS driver_name
+           FROM public.fleet_alerts a
+           LEFT JOIN public.fleet_drivers d
+             ON d.id=a.driver_id
+            AND d.company_id=a.company_id::text
+          WHERE a.company_id=$1
+            AND a.auto_resolved_at IS NULL
+            AND ($2='' OR a.is_read=$2::boolean)
+            AND ($3='' OR a.severity=$3)
+          ORDER BY a.created_at DESC LIMIT $4 OFFSET $5`,
         [cid, isRead, severity, limit, offset],
       ),
       pool.query<{ count: number }>(
-        "SELECT COUNT(*)::int AS count FROM public.fleet_alerts WHERE company_id=$1 AND is_read=false",
+        "SELECT COUNT(*)::int AS count FROM public.fleet_alerts WHERE company_id=$1 AND is_read=false AND auto_resolved_at IS NULL",
         [cid],
       ),
     ]);

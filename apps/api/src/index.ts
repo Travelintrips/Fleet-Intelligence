@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runFleetAutoReminderSweep } from "./lib/fleet-wa-reminder";
+import { runFleetAlertSweep } from "./lib/fleet-alerts";
 import { initializeProductionSessionSigning, isDevelopmentEnvironment } from "./routes/dev-auth";
 
 const port = Number(process.env.PORT || 8080);
@@ -20,10 +21,14 @@ const tick = async () => {
   if (running) return;
   running = true;
   try {
-    const result = await runFleetAutoReminderSweep();
-    if (result.length) logger.info({ result }, "Fleet WA reminder sweep completed");
+    const [reminders, alerts] = await Promise.all([
+      runFleetAutoReminderSweep(),
+      runFleetAlertSweep(),
+    ]);
+    if (reminders.length) logger.info({ result: reminders }, "Fleet WA reminder sweep completed");
+    if (alerts.length) logger.info({ result: alerts }, "Fleet alert sweep completed");
   } catch (error) {
-    logger.error({ error }, "Fleet WA reminder sweep failed");
+    logger.error({ error }, "Fleet background sweep failed");
   } finally {
     running = false;
   }
