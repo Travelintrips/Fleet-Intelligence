@@ -52,6 +52,13 @@ describe("Fleet production hardening contract", () => {
     expect(reminder).toContain("o.outstanding_amount > $3");
   });
 
+  it("provides a guarded WhatsApp integration test endpoint", () => {
+    expect(route).toContain('router.post("/wa/test"');
+    expect(route).toContain("WA Gateway Fleet belum siap atau device belum ONLINE");
+    expect(route).toContain("sendFleetWa({");
+    expect(route).toContain("Pesan test maksimal 2000 karakter");
+  });
+
   it("exposes non-secret WA gateway and device health", () => {
     expect(route).toContain('router.get("/wa/status"');
     expect(waClient).toContain("getFleetWaGatewayStatus");
