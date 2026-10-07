@@ -67,6 +67,29 @@ router.post("/gojek-connector/handoff", async (req, res) => {
   }
 });
 
+router.get("/gojek-connector/runtime-credentials", (req, res) => {
+  const cfg = getGojekConnectorConfig();
+  if (!cfg.enabled) {
+    res.status(409).json({ error: "Gojek connector belum diaktifkan." });
+    return;
+  }
+  if (!cfg.sharedSecretConfigured || !connectorSecretMatches(req.get("x-gojek-connector-secret"))) {
+    res.status(401).json({ error: "Connector runtime tidak terautentikasi." });
+    return;
+  }
+
+  const email = String(process.env.GOJEK_LOGIN_EMAIL ?? "").trim();
+  const password = String(process.env.GOJEK_LOGIN_PASSWORD ?? "");
+  if (!email || !password) {
+    res.status(503).json({ error: "Credential Gojek belum dikonfigurasi di Hostinger Secrets." });
+    return;
+  }
+
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.json({ email, password });
+});
+
 router.use((req, res, next) => {
   void authenticateAdmin(req as AdminRequest, res, next);
 });
@@ -1091,7 +1114,11 @@ router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
       encryptionKeyConfigured: cfg.encryptionKeyConfigured,
       maxFileMb: cfg.maxFileMb,
       retentionHours: cfg.retentionHours,
-      credentialStorage: "disabled",
+      credentialStorage: "hostinger-secrets",
+      loginCredentialConfigured: Boolean(
+        String(process.env.GOJEK_LOGIN_EMAIL ?? "").trim() &&
+        String(process.env.GOJEK_LOGIN_PASSWORD ?? "")
+      ),
       fileRetention: "none",
       handoffEndpoint: "/api/logistics/fleet/gojek-connector/handoff",
       automationPolicy: "official-export-no-stealth-no-bypass",
