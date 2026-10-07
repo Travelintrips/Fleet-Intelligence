@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const route = readFileSync(resolve(process.cwd(), "src/routes/fleet-intelligence.ts"), "utf8");
 const waClient = readFileSync(resolve(process.cwd(), "src/lib/wa-gateway-client.ts"), "utf8");
+const alertEngine = readFileSync(resolve(process.cwd(), "src/lib/fleet-alerts.ts"), "utf8");
+const serverEntry = readFileSync(resolve(process.cwd(), "src/index.ts"), "utf8");
 
 describe("Fleet production hardening contract", () => {
   it("does not count raw Gojek rows as trips", () => {
@@ -63,6 +65,18 @@ describe("Fleet production hardening contract", () => {
     expect(waClient).toContain("AMBIGUOUS_ONLINE_DEVICES");
     expect(waClient).toContain("DEVICE_CACHE_MS");
     expect(waClient).toContain("Promise.all([healthPromise, registryPromise])");
+  });
+
+  it("generates and refreshes automatic Fleet alerts", () => {
+    expect(alertEngine).toContain("outstanding_high");
+    expect(alertEngine).toContain("driver_inactive");
+    expect(alertEngine).toContain("revenue_drop");
+    expect(alertEngine).toContain("outstanding_amount >= 500000");
+    expect(alertEngine).toContain("last_active_date <= CURRENT_DATE - 7");
+    expect(alertEngine).toContain("dropPct > 15");
+    expect(alertEngine).toContain("auto_resolved_at=now()");
+    expect(route).toContain("syncFleetAlertsForCompany(cid)");
+    expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
   it("keeps Central Finance reads available while writes remain fail-closed", () => {
