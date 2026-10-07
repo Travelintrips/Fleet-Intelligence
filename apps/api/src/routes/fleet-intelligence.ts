@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
-import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
+import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -896,6 +896,31 @@ router.get("/wa/status", async (req: AdminRequest, res) => {
   } catch (error) {
     req.log.error({ error }, "Fleet WA status failed");
     res.status(503).json({ error: "Gagal mengambil status WA Gateway Fleet." });
+  }
+});
+
+router.post("/wa/test", async (req: AdminRequest, res) => {
+  try {
+    const cid=companyId(req);
+    const phone=String(req.body?.phone??"").trim();
+    const message=String(req.body?.message??"").trim();
+    if(!phone){res.status(400).json({error:"Nomor WhatsApp tujuan wajib diisi."});return;}
+    if(!message){res.status(400).json({error:"Pesan test wajib diisi."});return;}
+    if(message.length>2000){res.status(400).json({error:"Pesan test maksimal 2000 karakter."});return;}
+    const status=await getFleetWaGatewayStatus();
+    if(!(status.configured&&status.gatewayHealthy&&status.deviceId&&status.deviceStatus==="ONLINE")){
+      res.status(409).json({error:"WA Gateway Fleet belum siap atau device belum ONLINE.",wa:status});
+      return;
+    }
+    const provider=await sendFleetWa({
+      phone,
+      message,
+      idempotencyKey:"fleet-wa-test:"+cid+":"+Date.now(),
+    });
+    res.json({ok:true,...provider});
+  } catch(error) {
+    req.log.error({error},"Fleet WA test send failed");
+    res.status(502).json({error:error instanceof Error?error.message:"Gagal mengirim pesan test WhatsApp."});
   }
 });
 
