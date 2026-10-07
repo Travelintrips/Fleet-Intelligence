@@ -61,6 +61,8 @@ describe("Fleet production hardening contract", () => {
     expect(waClient).toContain("NOT_ASSIGNED");
     expect(waClient).toContain("single_online");
     expect(waClient).toContain("AMBIGUOUS_ONLINE_DEVICES");
+    expect(waClient).toContain("DEVICE_CACHE_MS");
+    expect(waClient).toContain("Promise.all([healthPromise, registryPromise])");
   });
 
   it("keeps Central Finance reads available while writes remain fail-closed", () => {
