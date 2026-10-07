@@ -76,7 +76,7 @@ async function updateWorkerState(companyId: number, patch: {
        sender_device=COALESCE($5,fleet_wa_worker_state.sender_device),
        device_status=COALESCE($6,fleet_wa_worker_state.device_status),
        last_result=COALESCE($7::jsonb,fleet_wa_worker_state.last_result),
-       last_error=$8,
+       last_error=CASE WHEN $9 THEN $8 ELSE fleet_wa_worker_state.last_error END,
        updated_at=NOW()`,
     [
       companyId,
@@ -87,6 +87,7 @@ async function updateWorkerState(companyId: number, patch: {
       patch.deviceStatus ?? null,
       patch.result == null ? null : JSON.stringify(patch.result),
       patch.error ?? null,
+      patch.error !== undefined,
     ],
   ).catch(() => undefined);
 }
