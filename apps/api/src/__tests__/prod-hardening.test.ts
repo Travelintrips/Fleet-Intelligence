@@ -99,6 +99,16 @@ describe("Fleet production hardening contract", () => {
     expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
+  it("provides a guarded Gojek connector handoff without storing credentials", () => {
+    expect(route).toContain('router.post("/gojek-connector/handoff"');
+    expect(route).toContain("x-gojek-connector-secret");
+    expect(route).toContain("timingSafeEqual");
+    expect(route).toContain("fileRetained: false");
+    expect(route).toContain('router.get("/gojek-connector/status"');
+    expect(route).not.toContain("GOJEK_USERNAME");
+    expect(route).not.toContain("GOJEK_PASSWORD");
+  });
+
   it("keeps Central Finance reads available while writes remain fail-closed", () => {
     const finance = readFileSync(resolve(process.cwd(), "src/lib/central-finance-client.ts"), "utf8");
     expect(finance).toContain("getFleetAccountingSettingsDirect");
