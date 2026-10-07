@@ -41,9 +41,15 @@ GOJEK_CONNECTOR_MAX_FILE_MB=10
 
 ```bash
 cd connector/gojek-export-bridge
+cp package.bridge.json package.json
 npm install
 npx playwright install chromium
 npm start
 ```
 
 Bridge sengaja berada di luar root npm workspace agar dependency Playwright tidak ikut ke build Hostinger Fleet.
+
+
+## Hostinger production note
+
+File manifest bridge sengaja bernama `package.bridge.json`, bukan `package.json`, agar Hostinger hanya mendeteksi aplikasi Fleet utama di root repository. Saat bridge dijalankan di mesin/VM connector, copy manifest ini menjadi `package.json` terlebih dahulu seperti contoh di atas.
