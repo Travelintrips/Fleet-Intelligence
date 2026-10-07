@@ -568,7 +568,6 @@ export default function FleetOutstandingPage() {
   /* ── WA helpers ───────────────────────────────────────────────────── */
   function openWaModal(o: Record<string, unknown>) {
     const phone = String(o.driver_phone ?? "").trim();
-    if (!phone) { toast.error("Nomor HP driver tidak tersedia"); return; }
     const name   = String(o.driver_name ?? "Driver");
     const plate  = String(o.vehicle_plate ?? "-");
     const amount = fmtIdr(o.outstanding_amount);
@@ -1479,10 +1478,24 @@ export default function FleetOutstandingPage() {
                 Kirim WA — {waPreview.name}
               </DialogTitle>
               <DialogDescription className="text-slate-400 text-xs">
-                Nomor: {waPreview.phone} · Edit pesan sebelum mengirim
+                Nomor tujuan dan pesan dapat diedit sebelum dikirim. Nomor yang diubah di sini hanya berlaku untuk pengiriman ini dan tidak mengubah data master driver.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
+              <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <Label className="text-slate-300 text-sm">Nomor WhatsApp tujuan</Label>
+                  <span className="text-[11px] text-slate-500">Master: {waPreview.phone || "belum tersedia"}</span>
+                </div>
+                <Input
+                  value={waPreview.phone}
+                  onChange={(e) => setWaPreview({ ...waPreview, phone: e.target.value })}
+                  placeholder="Contoh: 081234567890 atau 6281234567890"
+                  inputMode="tel"
+                  className="bg-slate-900 border-slate-600 text-white"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">Gunakan nomor WA aktif driver. Sistem akan menormalisasi format nomor saat dikirim.</p>
+              </div>
               <div className="flex items-center justify-between">
                 <Label className="text-slate-300 text-sm">Pesan WhatsApp</Label>
                 <Button variant="ghost" size="sm"
@@ -1501,7 +1514,7 @@ export default function FleetOutstandingPage() {
               <div className="flex gap-3 pt-1">
                 <Button variant="outline" className="flex-1 border-slate-600" onClick={() => setWaPreview(null)}>Batal</Button>
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 gap-2"
-                  disabled={waSending || !waPreview.message.trim() || !waReady} onClick={sendWa}>
+                  disabled={waSending || !waPreview.phone.trim() || !waPreview.message.trim() || !waReady} onClick={sendWa}>
                   <Send className="w-4 h-4" />
                   {waSending ? "Mengirim..." : "Kirim WA"}
                 </Button>
