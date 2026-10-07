@@ -58,8 +58,21 @@ async function hiddenPrompt(label){
   });
 }
 
-const secret=await hiddenPrompt("Masukkan GOJEK_CONNECTOR_SHARED_SECRET dari Hostinger: ");
-if(!secret.trim()) throw new Error("Shared secret wajib diisi.");
+let existingProtected = "";
+const existingConfigPath = path.join(target,"config.json");
+if (fs.existsSync(existingConfigPath)) {
+  try {
+    const current = JSON.parse(fs.readFileSync(existingConfigPath,"utf8"));
+    existingProtected = String(current.sharedSecretProtected || "").trim();
+  } catch {}
+}
+
+let secret = "";
+let protectedSecret = existingProtected;
+if (!protectedSecret) {
+  secret=await hiddenPrompt("Masukkan GOJEK_CONNECTOR_SHARED_SECRET dari Hostinger: ");
+  if(!secret.trim()) throw new Error("Shared secret wajib diisi.");
+}
 
 const ps=[
   "$ErrorActionPreference='Stop'",
@@ -67,17 +80,20 @@ const ps=[
   "$sec=ConvertTo-SecureString $plain -AsPlainText -Force",
   "[Console]::Out.Write((ConvertFrom-SecureString $sec))"
 ].join(";");
-const enc=spawnSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{
-  input:secret,encoding:"utf8",windowsHide:true
-});
-if(enc.status!==0) throw new Error("Gagal mengenkripsi secret dengan Windows DPAPI.");
+if (!protectedSecret) {
+  const enc=spawnSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{
+    input:secret,encoding:"utf8",windowsHide:true
+  });
+  if(enc.status!==0) throw new Error("Gagal mengenkripsi secret dengan Windows DPAPI.");
+  protectedSecret=String(enc.stdout||"").trim();
+}
 
 fs.copyFileSync(path.join(here,"watcher.mjs"),path.join(target,"watcher.mjs"));
 fs.writeFileSync(path.join(target,"config.json"),JSON.stringify({
   fleetBaseUrl:"https://fleet.cstlogistic.co.id",
   portalUrl:"https://fleetpartner.gojek.com",
   controlPort:17891,
-  sharedSecretProtected:String(enc.stdout||"").trim()
+  sharedSecretProtected:protectedSecret
 },null,2),"utf8");
 
 const vbs='Set sh = CreateObject("WScript.Shell")\r\nsh.Run """node"" """ & CreateObject("Scripting.FileSystemObject").BuildPath(CreateObject("WScript.Shell").ExpandEnvironmentStrings("%LOCALAPPDATA%"), "CSTFleetWatcher\\watcher.mjs") & """", 0, False\r\n';
