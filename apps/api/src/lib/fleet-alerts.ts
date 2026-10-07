@@ -45,7 +45,8 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
        'outstanding_high',
        CASE WHEN o.outstanding_amount >= 1000000 THEN 'critical' ELSE 'warning' END,
        'Outstanding Tinggi — ' || o.driver_name,
-       'Outstanding driver ' || o.driver_name || ' sebesar ' || $2 ||
+       'Outstanding driver ' || o.driver_name || ' sebesar Rp ' ||
+         trim(to_char(o.outstanding_amount, 'FM999G999G999G999G990')) ||
          CASE WHEN NULLIF(o.vehicle_plate,'') IS NOT NULL THEN ' · ' || o.vehicle_plate ELSE '' END,
        'fleet_outstanding',
        o.id::text,
@@ -67,7 +68,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
        message=EXCLUDED.message,
        driver_id=EXCLUDED.driver_id
      RETURNING id`,
-    [companyId, "__AMOUNT_PLACEHOLDER__"],
+    [companyId],
   ).catch(async () => {
     // Re-run with per-row formatted amount when legacy schema/index behavior rejects the optimized statement.
     const rows = await pool.query<{
