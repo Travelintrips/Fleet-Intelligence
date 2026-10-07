@@ -17,8 +17,15 @@ import {
 const router = Router();
 
 function getGojekServerConnectorConfig() {
-  const url = String(process.env.GOJEK_SERVER_CONNECTOR_URL ?? "").trim().replace(/\/$/, "");
-  const token = String(process.env.GOJEK_SERVER_CONNECTOR_TOKEN ?? "").trim();
+  const url = String(
+    process.env.GOJEK_SERVER_CONNECTOR_URL ??
+    "http://72.61.210.205:18082"
+  ).trim().replace(/\/$/, "");
+  const token = String(
+    process.env.GOJEK_SERVER_CONNECTOR_TOKEN ??
+    process.env.GOJEK_CONNECTOR_SHARED_SECRET ??
+    ""
+  ).trim();
   return { url, token, configured: Boolean(url && token) };
 }
 
