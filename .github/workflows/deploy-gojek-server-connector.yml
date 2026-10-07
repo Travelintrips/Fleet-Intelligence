@@ -20,11 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: fleet-dev
     env:
-      SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-      SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
-      SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+      SSH_HOST: 72.61.210.205
+      SSH_PORT: "22"
+      SSH_USER: root
       SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-      SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
       GOJEK_CONNECTOR_SHARED_SECRET: ${{ secrets.GOJEK_CONNECTOR_SHARED_SECRET }}
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS GOJEK_CONNECTOR_SHARED_SECRET; do
+          for name in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY GOJEK_CONNECTOR_SHARED_SECRET; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing required secret: $name"
               exit 1
@@ -48,7 +47,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Package connector
