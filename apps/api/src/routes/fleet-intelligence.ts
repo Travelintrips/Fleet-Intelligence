@@ -1929,7 +1929,16 @@ router.get("/drivers", async (req: AdminRequest, res) => {
           WHERE d.company_id=$1::text
             AND ($2='' OR d.full_name ILIKE '%' || $2 || '%' OR COALESCE(d.driver_external_id,'') ILIKE '%' || $2 || '%' OR COALESCE(d.vehicle_plate,'') ILIKE '%' || $2 || '%' OR COALESCE(d.phone,'') ILIKE '%' || $2 || '%')
             AND ${statusSql}
-          ORDER BY d.full_name ASC
+          ORDER BY
+            CASE
+              WHEN d.status = 'active' THEN 1
+              WHEN d.status = 'suspended' OR d.applicator_status = 'fired' THEN 2
+              WHEN d.applicator_status = 'need_to_assign' THEN 3
+              WHEN d.applicator_status = 'resign' THEN 4
+              WHEN d.status = 'fired' THEN 5
+              ELSE 6
+            END ASC,
+            d.full_name ASC
           LIMIT $4 OFFSET $5`,
         [cid, search, status, limit, offset],
       ),
