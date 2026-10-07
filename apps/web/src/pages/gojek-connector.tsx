@@ -17,6 +17,7 @@ type ConnectorStatus = {
   maxFileMb: number;
   retentionHours: number;
   credentialStorage: string;
+  loginCredentialConfigured?: boolean;
   fileRetention: string;
   handoffEndpoint: string;
   automationPolicy: string;
@@ -96,7 +97,7 @@ export default function GojekConnectorPage() {
           {[
             ["Connector", data?.enabled ? "Aktif" : "Nonaktif", data?.enabled ? "text-emerald-300" : "text-slate-400"],
             ["Receiver", data?.ready ? "Siap" : "Belum Siap", data?.ready ? "text-emerald-300" : "text-amber-300"],
-            ["Credential Gojek", "Tidak Disimpan", "text-emerald-300"],
+            ["Credential Gojek", data?.loginCredentialConfigured ? "Hostinger Secret" : "Belum Diset", data?.loginCredentialConfigured ? "text-emerald-300" : "text-amber-300"],
             ["File Export", data?.fileRetention === "none" ? "Tidak Disimpan" : "Temporary", "text-emerald-300"],
             ["Bridge Lokal", bridgeStatus === "online" ? "Terhubung" : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
           ].map(([label,value,cls]) => (
