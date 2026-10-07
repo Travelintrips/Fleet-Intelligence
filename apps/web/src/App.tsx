@@ -23,6 +23,7 @@ const Pipeline = React.lazy(() => import("@/pages/pipeline-monitor"));
 const DriverMacet = React.lazy(() => import("@/pages/driver-macet"));
 const Macet = React.lazy(() => import("@/pages/macet"));
 const CashPayments = React.lazy(() => import("@/pages/cash-payments"));
+const WhatsApp = React.lazy(() => import("@/pages/whatsapp"));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
@@ -122,6 +123,7 @@ function Routes() {
       <Route path="/logistics/fleet-intelligence/outstanding" component={Outstanding} />
       <Route path="/logistics/fleet-intelligence/analytics" component={Analytics} />
       <Route path="/logistics/fleet-intelligence/alerts" component={Alerts} />
+      <Route path="/logistics/fleet-intelligence/whatsapp" component={WhatsApp} />
       <Route path="/logistics/fleet-intelligence/accounting" component={Accounting} />
       <Route path="/logistics/fleet-intelligence/validation" component={Validation} />
       <Route path="/logistics/fleet-intelligence/expenses" component={Expenses} />
