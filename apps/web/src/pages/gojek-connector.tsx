@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ExternalLink, Link2, ShieldCheck, Database, FileDown, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
@@ -67,6 +67,12 @@ export default function GojekConnectorPage() {
       toast.error(error instanceof Error ? error.message : "Bridge tidak dapat dihubungi.");
     }
   }
+
+  useEffect(() => {
+    void checkBridge();
+    const timer = window.setInterval(() => void checkBridge(), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <AppShell>
