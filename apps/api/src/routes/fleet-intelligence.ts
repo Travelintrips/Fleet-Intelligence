@@ -1383,7 +1383,21 @@ router.get("/transactions", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
     if (!(await tableExists("fleet_transactions"))) {
-      res.json({ transactions: [], summary: { total: 0, total_trips: 0, total_net: 0, total_gross: 0 } });
+      const rawCount = (await tableExists("gojek_raw_transactions"))
+        ? Number((await pool.query<{ count: number }>(
+            "SELECT COUNT(*)::int AS count FROM public.gojek_raw_transactions WHERE company_id=$1",
+            [cid],
+          )).rows[0]?.count ?? 0)
+        : 0;
+      res.json({
+        transactions: [],
+        summary: { total: 0, total_trips: 0, total_net: 0, total_gross: 0 },
+        sourceStatus: {
+          normalizedRows: 0,
+          rawRows: rawCount,
+          state: rawCount > 0 ? "raw_only" : "no_source_data",
+        },
+      });
       return;
     }
     const startDate = typeof req.query.startDate === "string" ? req.query.startDate : null;
@@ -1419,7 +1433,22 @@ router.get("/transactions", async (req: AdminRequest, res) => {
           AND ($5='' OR COALESCE(vehicle_plate,'') ILIKE '%' || $5 || '%')`,
       [cid, startDate, endDate, driverSearch, vehiclePlate],
     );
-    res.json({ transactions: rows.rows, summary: summary.rows[0] ?? {} });
+    const rawRows = (await tableExists("gojek_raw_transactions"))
+      ? Number((await pool.query<{ count: number }>(
+          "SELECT COUNT(*)::int AS count FROM public.gojek_raw_transactions WHERE company_id=$1",
+          [cid],
+        )).rows[0]?.count ?? 0)
+      : 0;
+    const normalizedRows = Number(summary.rows[0]?.total ?? 0);
+    res.json({
+      transactions: rows.rows,
+      summary: summary.rows[0] ?? {},
+      sourceStatus: {
+        normalizedRows,
+        rawRows,
+        state: normalizedRows > 0 ? "normalized" : rawRows > 0 ? "raw_only" : "no_source_data",
+      },
+    });
   } catch (error) {
     req.log.error({ error }, "Fleet transactions failed");
     res.status(503).json({ error: "Gagal mengambil transaksi fleet." });
