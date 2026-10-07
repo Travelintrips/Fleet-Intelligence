@@ -10,7 +10,7 @@ function required(name) {
 const port = Number(process.env.PORT ?? 8080);
 const fleetBaseUrl = required("FLEET_BASE_URL").replace(/\/$/, "");
 const connectorSecret = required("GOJEK_CONNECTOR_SHARED_SECRET");
-const serviceToken = required("GOJEK_SERVER_CONNECTOR_TOKEN");
+const serviceToken = String(process.env.GOJEK_SERVER_CONNECTOR_TOKEN ?? connectorSecret).trim();
 const portalUrl = String(process.env.GOJEK_FLEET_PORTAL_URL ?? "https://fleetpartner.gojek.com").trim();
 const allowedHost = String(process.env.GOJEK_CONNECTOR_ALLOWED_HOST ?? "fleetpartner.gojek.com").trim();
 
