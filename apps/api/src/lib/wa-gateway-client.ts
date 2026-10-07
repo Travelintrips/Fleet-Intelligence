@@ -135,49 +135,65 @@ export async function sendFleetWa(args: { phone: string; message: string; idempo
   const phone = normalizeFleetPhone(args.phone);
   if (!phone) throw new Error("Nomor WhatsApp Fleet tidak valid.");
 
-  const resolved = await resolveFleetDevice(baseUrl, token, cfg.configuredDeviceId);
-  if (!resolved.ok || !resolved.selection) {
-    if (resolved.statusCode === 401 || resolved.statusCode === 403) {
-      throw new Error("Token WA Gateway Fleet tidak memiliki akses device.");
+  let lastError = "WA Gateway gagal mengirim pesan.";
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const resolved = await resolveFleetDevice(baseUrl, token, cfg.configuredDeviceId, attempt > 0);
+    if (!resolved.ok || !resolved.selection) {
+      if (resolved.statusCode === 401 || resolved.statusCode === 403) {
+        throw new Error("Token WA Gateway Fleet tidak memiliki akses device.");
+      }
+      throw new Error(`WA Gateway device registry HTTP ${resolved.statusCode}`);
     }
-    throw new Error(`WA Gateway device registry HTTP ${resolved.statusCode}`);
+
+    const selection = resolved.selection;
+    if (!selection.deviceId) {
+      throw new Error(`Device WA Fleet belum dapat ditentukan: ${selection.status}`);
+    }
+    if (selection.status !== "ONLINE") {
+      throw new Error(`Device WA Fleet ${selection.deviceId} tidak ONLINE: ${selection.status}`);
+    }
+
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(args.idempotencyKey ? { "Idempotency-Key": args.idempotencyKey } : {}),
+      },
+      body: JSON.stringify({
+        type: "text",
+        to: phone,
+        text: args.message,
+        deviceId: selection.deviceId,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (response.ok) {
+      return {
+        messageId: String(payload.messageId ?? payload.id ?? payload.requestId ?? "") || null,
+        senderDevice: selection.deviceId,
+        deviceStatus: "ONLINE",
+      };
+    }
+
+    lastError = String(payload.error ?? payload.message ?? `WA Gateway HTTP ${response.status}`);
+    const staleDevice =
+      response.status === 409 ||
+      response.status === 422 ||
+      response.status === 503 ||
+      /disconnected device|device.*disconnect|not connected|offline/i.test(lastError);
+
+    if (!staleDevice || attempt > 0) {
+      throw new Error(lastError);
+    }
+
+    deviceSelectionCache = null;
   }
 
-  const selection = resolved.selection;
-  if (!selection.deviceId) {
-    throw new Error(`Device WA Fleet belum dapat ditentukan: ${selection.status}`);
-  }
-  if (selection.status !== "ONLINE") {
-    throw new Error(`Device WA Fleet ${selection.deviceId} tidak ONLINE: ${selection.status}`);
-  }
-
-  const response = await fetch(`${baseUrl}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(args.idempotencyKey ? { "Idempotency-Key": args.idempotencyKey } : {}),
-    },
-    body: JSON.stringify({
-      type: "text",
-      to: phone,
-      text: args.message,
-      deviceId: selection.deviceId,
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) {
-    if (response.status === 409 || response.status === 422 || response.status === 503) {
-      deviceSelectionCache = null;
-    }
-    throw new Error(String(payload.error ?? payload.message ?? `WA Gateway HTTP ${response.status}`));
-  }
-  return {
-    messageId: String(payload.messageId ?? payload.id ?? payload.requestId ?? "") || null,
-    senderDevice: selection.deviceId,
-    deviceStatus: "ONLINE",
-  };
+  throw new Error(lastError);
 }
 
 export async function getFleetWaGatewayStatus() {
