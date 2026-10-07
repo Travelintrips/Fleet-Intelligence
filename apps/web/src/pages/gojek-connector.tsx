@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ExternalLink, Link2, ShieldCheck, Database, FileDown, RefreshCw } from "lucide-react";
@@ -21,6 +21,13 @@ type ConnectorStatus = {
   fileRetention: string;
   handoffEndpoint: string;
   automationPolicy: string;
+  serverConnector?: {
+    configured: boolean;
+    healthy: boolean;
+    busy: boolean;
+    lastRun?: Record<string, unknown> | null;
+    service?: string | null;
+  };
 };
 
 const LOCAL_BRIDGE = "http://127.0.0.1:17891";
@@ -37,6 +44,24 @@ export default function GojekConnectorPage() {
       return json;
     },
     staleTime: 30_000,
+  });
+
+  const syncDrivers = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/logistics/fleet/gojek-connector/server-sync/drivers", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Sync Drivers Gojek gagal");
+      return json;
+    },
+    onSuccess: () => {
+      toast.success("Sync Drivers/Outstanding Gojek berhasil.");
+      void refetch();
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   async function checkBridge(showToast = false) {
@@ -87,12 +112,20 @@ export default function GojekConnectorPage() {
             <h1 className="text-2xl font-bold text-white">Gojek Fleet Partner Connector</h1>
             <p className="mt-1 text-sm text-slate-400">Jalur export resmi Gojek → server handoff → Fleet transaction pipeline</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" className="gap-2" disabled={isFetching} onClick={() => { refetch(); void checkBridge(true); }}>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="gap-2" disabled={isFetching} onClick={() => { refetch(); void checkBridge(false); }}>
               <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh
             </Button>
-            <Button className="gap-2" disabled={!data?.portalUrl || bridgeStatus === "checking"} onClick={() => void openPortal()}>
-              <ExternalLink className="h-4 w-4" /> Buka Fleet Partner Gojek
+            <Button
+              className="gap-2"
+              disabled={!data?.serverConnector?.healthy || data?.serverConnector?.busy || syncDrivers.isPending}
+              onClick={() => syncDrivers.mutate()}
+            >
+              <RefreshCw className={`h-4 w-4 ${syncDrivers.isPending ? "animate-spin" : ""}`} />
+              {syncDrivers.isPending ? "Sync Berjalan..." : "Sync Drivers dari Gojek"}
+            </Button>
+            <Button variant="outline" className="gap-2" disabled={!data?.portalUrl} onClick={() => window.open(data.portalUrl, "_blank", "noopener,noreferrer")}>
+              <ExternalLink className="h-4 w-4" /> Buka Fleet Partner
             </Button>
           </div>
         </div>
@@ -102,8 +135,8 @@ export default function GojekConnectorPage() {
             ["Connector", data?.enabled ? "Aktif" : "Nonaktif", data?.enabled ? "text-emerald-300" : "text-slate-400"],
             ["Receiver", data?.ready ? "Siap" : "Belum Siap", data?.ready ? "text-emerald-300" : "text-amber-300"],
             ["Credential Gojek", data?.loginCredentialConfigured ? "Hostinger Secret" : "Belum Diset", data?.loginCredentialConfigured ? "text-emerald-300" : "text-amber-300"],
-            ["File Export", data?.fileRetention === "none" ? "Tidak Disimpan" : "Temporary", "text-emerald-300"],
-            ["Watcher Lokal", bridgeStatus === "online" ? `Terhubung${watcherVersion ? ` · v${watcherVersion}` : ""}` : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
+            ["Server Connector", data?.serverConnector?.healthy ? "Online" : data?.serverConnector?.configured ? "Offline" : "Belum Diset", data?.serverConnector?.healthy ? "text-emerald-300" : "text-amber-300"],
+            ["Watcher Lokal", bridgeStatus === "online" ? `Fallback · ${watcherVersion ? `v${watcherVersion}` : "aktif"}` : "Tidak Diperlukan", bridgeStatus === "online" ? "text-slate-300" : "text-slate-500"],
           ].map(([label,value,cls]) => (
             <Card key={label} className="border-white/[0.07] bg-slate-900/70">
               <CardContent className="p-4">
@@ -156,8 +189,8 @@ export default function GojekConnectorPage() {
           <CardContent className="flex gap-3 p-5">
             <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10"><FileDown className="h-4 w-4 text-indigo-300" /></div>
             <div>
-              <div className="font-semibold text-slate-100">Export otomatis melalui Windows Watcher</div>
-              <p className="mt-1 text-sm text-slate-400">Jalankan Windows Watcher sampai status “Watcher Lokal: Terhubung”. Setelah itu gunakan Chrome/Fleet Partner seperti biasa dan klik Export. CSV yang selesai masuk ke Downloads akan otomatis dikirim ke CST Fleet dan dihapus setelah import berhasil.</p>
+              <div className="font-semibold text-slate-100">Sinkronisasi otomatis dari server</div>
+              <p className="mt-1 text-sm text-slate-400">Jika Server Connector berstatus Online, Anda bisa menjalankan Sync Drivers dari komputer mana pun tanpa memasang Windows Watcher. Server connector login ke Fleet Partner menggunakan credential Hostinger, menjalankan export resmi, lalu mengirim CSV langsung ke CST Fleet/Supabase. Windows Watcher tetap bisa dipakai hanya sebagai fallback.</p>
             </div>
           </CardContent>
         </Card>
