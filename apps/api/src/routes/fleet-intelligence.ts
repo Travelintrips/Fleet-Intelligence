@@ -4,6 +4,7 @@ import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
+import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -887,6 +888,29 @@ router.post("/outstanding/snapshot/confirm", async (req: AdminRequest, res) => {
   }
 });
 
+
+router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const cfg=getGojekConnectorConfig();
+    res.json({
+      enabled:cfg.enabled,
+      mode:cfg.mode,
+      portalUrl:cfg.portalUrl,
+      allowedHost:cfg.allowedHost,
+      ready:cfg.enabled&&cfg.sharedSecretConfigured&&cfg.encryptionKeyConfigured,
+      sharedSecretConfigured:cfg.sharedSecretConfigured,
+      encryptionKeyConfigured:cfg.encryptionKeyConfigured,
+      maxFileMb:cfg.maxFileMb,
+      retentionHours:cfg.retentionHours,
+      credentialStorage:"disabled",
+      automationPolicy:"no-stealth-no-bypass",
+    });
+  } catch(error) {
+    req.log.error({error},"Gojek connector status failed");
+    res.status(503).json({error:error instanceof Error?error.message:"Gagal membaca status Gojek connector."});
+  }
+});
 
 router.get("/wa/status", async (req: AdminRequest, res) => {
   try {
