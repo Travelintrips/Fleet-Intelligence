@@ -44,11 +44,11 @@ export default function GojekConnectorPage() {
       const res = await fetch(`${LOCAL_BRIDGE}/health`, { method: "GET", cache: "no-store" });
       if (!res.ok) throw new Error("Bridge tidak merespons");
       setBridgeStatus("online");
-      if (showToast) toast.success("Bridge lokal terhubung.");
+      if (showToast) toast.success("watcher lokal terhubung.");
       return true;
     } catch {
       setBridgeStatus("offline");
-      if (showToast) toast.error("Bridge lokal belum berjalan di PC ini.");
+      if (showToast) toast.error("watcher lokal belum berjalan di PC ini.");
       return false;
     }
   }
@@ -56,13 +56,13 @@ export default function GojekConnectorPage() {
   async function openPortal() {
     const online = bridgeStatus === "online" || await checkBridge();
     if (!online) {
-      toast.error("Jalankan Gojek Export Bridge terlebih dahulu. Jangan export dari Chrome biasa.");
+      toast.error("Jalankan CST Fleet Windows Watcher terlebih dahulu.");
       return;
     }
     try {
       const res = await fetch(`${LOCAL_BRIDGE}/open`, { method: "POST" });
       if (!res.ok) throw new Error("Bridge gagal membuka portal");
-      toast.success("Fleet Partner dibuka melalui browser bridge.");
+      toast.success("Fleet Partner dibuka melalui Chrome biasa + watcher.");
     } catch (error) {
       setBridgeStatus("offline");
       toast.error(error instanceof Error ? error.message : "Bridge tidak dapat dihubungi.");
@@ -99,7 +99,7 @@ export default function GojekConnectorPage() {
             ["Receiver", data?.ready ? "Siap" : "Belum Siap", data?.ready ? "text-emerald-300" : "text-amber-300"],
             ["Credential Gojek", data?.loginCredentialConfigured ? "Hostinger Secret" : "Belum Diset", data?.loginCredentialConfigured ? "text-emerald-300" : "text-amber-300"],
             ["File Export", data?.fileRetention === "none" ? "Tidak Disimpan" : "Temporary", "text-emerald-300"],
-            ["Bridge Lokal", bridgeStatus === "online" ? "Terhubung" : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
+            ["Watcher Lokal", bridgeStatus === "online" ? "Terhubung" : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
           ].map(([label,value,cls]) => (
             <Card key={label} className="border-white/[0.07] bg-slate-900/70">
               <CardContent className="p-4">
@@ -152,8 +152,8 @@ export default function GojekConnectorPage() {
           <CardContent className="flex gap-3 p-5">
             <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10"><FileDown className="h-4 w-4 text-indigo-300" /></div>
             <div>
-              <div className="font-semibold text-slate-100">Export harus dilakukan melalui browser bridge</div>
-              <p className="mt-1 text-sm text-slate-400">Jika tombol Export Gojek ditekan dari Chrome biasa, file akan tetap masuk ke Downloads PC. Jalankan bridge lokal sampai status “Bridge Lokal: Terhubung”, lalu gunakan tombol “Buka Fleet Partner Gojek” di halaman ini. Download dari browser bridge akan langsung di-handoff ke CST Fleet.</p>
+              <div className="font-semibold text-slate-100">Export otomatis melalui Windows Watcher</div>
+              <p className="mt-1 text-sm text-slate-400">Jalankan Windows Watcher sampai status “Watcher Lokal: Terhubung”. Setelah itu gunakan Chrome/Fleet Partner seperti biasa dan klik Export. CSV yang selesai masuk ke Downloads akan otomatis dikirim ke CST Fleet dan dihapus setelah import berhasil.</p>
             </div>
           </CardContent>
         </Card>
