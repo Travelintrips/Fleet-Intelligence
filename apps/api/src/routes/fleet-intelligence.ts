@@ -16,6 +16,36 @@ import {
 
 const router = Router();
 
+function getGojekServerConnectorConfig() {
+  const url = String(process.env.GOJEK_SERVER_CONNECTOR_URL ?? "").trim().replace(/\/$/, "");
+  const token = String(process.env.GOJEK_SERVER_CONNECTOR_TOKEN ?? "").trim();
+  return { url, token, configured: Boolean(url && token) };
+}
+
+async function getGojekServerConnectorHealth() {
+  const cfg = getGojekServerConnectorConfig();
+  if (!cfg.configured) {
+    return { configured: false, healthy: false, busy: false, lastRun: null };
+  }
+  try {
+    const response = await fetch(`${cfg.url}/health`, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return {
+      configured: true,
+      healthy: response.ok && payload.ok === true,
+      busy: Boolean(payload.busy),
+      lastRun: payload.lastRun ?? null,
+      service: payload.service ?? null,
+    };
+  } catch {
+    return { configured: true, healthy: false, busy: false, lastRun: null };
+  }
+}
+
 function connectorSecretMatches(value: unknown): boolean {
   const expected = String(process.env.GOJEK_CONNECTOR_SHARED_SECRET ?? "").trim();
   const supplied = String(value ?? "").trim();
@@ -1222,6 +1252,7 @@ router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
   try {
     companyId(req);
     const cfg = getGojekConnectorConfig();
+    const serverConnector = await getGojekServerConnectorHealth();
     res.json({
       enabled: cfg.enabled,
       mode: cfg.mode,
@@ -1240,10 +1271,55 @@ router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
       fileRetention: "none",
       handoffEndpoint: "/api/logistics/fleet/gojek-connector/handoff",
       automationPolicy: "official-export-no-stealth-no-bypass",
+      serverConnector,
     });
   } catch (error) {
     req.log.error({ error }, "Gojek connector status failed");
     res.status(503).json({ error: error instanceof Error ? error.message : "Gagal membaca status Gojek connector." });
+  }
+});
+
+router.get("/gojek-connector/server-status", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const status = await getGojekServerConnectorHealth();
+    res.json(status);
+  } catch (error) {
+    req.log.error({ error }, "Gojek server connector status failed");
+    res.status(503).json({ error: "Gagal mengambil status server connector." });
+  }
+});
+
+router.post("/gojek-connector/server-sync/drivers", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const cfg = getGojekServerConnectorConfig();
+    if (!cfg.configured) {
+      res.status(409).json({ error: "Server connector belum dikonfigurasi." });
+      return;
+    }
+
+    const response = await fetch(`${cfg.url}/sync/drivers`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ requestedBy: req.adminUser?.email ?? "unknown" }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      res.status(response.status === 409 ? 409 : 502).json({
+        error: payload.error ?? `Server connector HTTP ${response.status}`,
+      });
+      return;
+    }
+
+    res.json({ ok: true, ...payload });
+  } catch (error) {
+    req.log.error({ error }, "Gojek server connector sync failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Sync Gojek server gagal." });
   }
 });
 
