@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Receipt, Download, Search, X, ArrowLeft } from "lucide-react";
+import { Receipt, Download, Search, X, ArrowLeft, UploadCloud, Database } from "lucide-react";
 import { Link } from "wouter";
 
 function fmtIdr(v: unknown) {
@@ -28,23 +28,27 @@ export default function FleetTransactionsPage() {
   const [driverSearchApplied, setDriverSearchApplied] = useState("");
   const [vehiclePlateApplied, setVehiclePlateApplied] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["fleet-transactions", startDate, endDate, page, driverSearchApplied, vehiclePlateApplied],
+    queryKey: ["fleet-transactions", startDate, endDate, page, pageSize, driverSearchApplied, vehiclePlateApplied],
     queryFn: async () => {
-      const params = new URLSearchParams({ startDate, endDate, page: String(page), limit: "100" });
+      const params = new URLSearchParams({ startDate, endDate, page: String(page), limit: String(pageSize) });
       if (driverSearchApplied) params.set("driverSearch", driverSearchApplied);
       if (vehiclePlateApplied) params.set("vehiclePlate", vehiclePlateApplied);
       const res = await fetch(`/api/logistics/fleet/transactions?${params}`, { credentials: "include" });
       return res.json() as Promise<{
         transactions: Array<Record<string, unknown>>;
         summary: Record<string, unknown>;
+        sourceStatus?: { normalizedRows: number; rawRows: number; state: "normalized" | "raw_only" | "no_source_data" };
       }>;
     },
   });
 
   const transactions = data?.transactions ?? [];
   const summary = data?.summary ?? {};
+  const sourceStatus = data?.sourceStatus;
+  const noSourceData = sourceStatus?.state === "no_source_data";
 
   function applyFilters() {
     setDriverSearchApplied(driverSearch);
@@ -169,6 +173,37 @@ export default function FleetTransactionsPage() {
           </CardContent>
         </Card>
 
+        {noSourceData && (
+          <Card className="border-amber-500/20 bg-amber-500/[0.055]">
+            <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-3">
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10">
+                  <Database className="h-4 w-4 text-amber-300" />
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-100">Belum ada data transaksi Gojek</div>
+                  <p className="mt-1 max-w-2xl text-sm text-slate-400">
+                    Fleet belum menerima report transaksi. Upload report Gojek agar data otomatis masuk ke raw transaction, dinormalisasi, lalu tampil di Transactions dan Analytics.
+                  </p>
+                </div>
+              </div>
+              <Link href="/logistics/fleet-intelligence/upload">
+                <Button className="shrink-0 gap-2">
+                  <UploadCloud className="h-4 w-4" /> Upload Report
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
+        {sourceStatus?.state === "raw_only" && (
+          <Card className="border-blue-500/20 bg-blue-500/[0.045]">
+            <CardContent className="p-4 text-sm text-blue-200">
+              Raw transaction tersedia ({fmtNum(sourceStatus.rawRows)} baris), tetapi belum ada transaksi normalized pada filter/periode ini.
+            </CardContent>
+          </Card>
+        )}
+
         {/* Summary */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -209,8 +244,13 @@ export default function FleetTransactionsPage() {
                         <tr>
                           <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
                             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                            <p>Tidak ada transaksi di periode ini</p>
-                            {hasActiveFilters && <p className="text-xs mt-1">Coba ubah atau hapus filter</p>}
+                            <p>{noSourceData ? "Belum ada report transaksi yang diproses" : "Tidak ada transaksi di periode ini"}</p>
+                            {hasActiveFilters && !noSourceData && <p className="text-xs mt-1">Coba ubah atau hapus filter</p>}
+                            {noSourceData && (
+                              <Link href="/logistics/fleet-intelligence/upload">
+                                <Button size="sm" variant="outline" className="mt-4 gap-2"><UploadCloud className="h-3.5 w-3.5" /> Upload Report</Button>
+                              </Link>
+                            )}
                           </td>
                         </tr>
                       )
@@ -235,10 +275,20 @@ export default function FleetTransactionsPage() {
             </div>
             <div className="flex items-center justify-between px-4 py-3 border-t border-slate-700">
               <span className="text-slate-400 text-sm">{fmtNum(summary.total)} total transaksi</span>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-sm text-slate-300"
+                  aria-label="Jumlah transaksi per halaman"
+                >
+                  <option value={10}>10 / halaman</option>
+                  <option value={25}>25 / halaman</option>
+                  <option value={50}>50 / halaman</option>
+                </select>
                 <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
                 <span className="px-3 py-1 text-slate-400 text-sm">Hal. {page}</span>
-                <Button variant="outline" size="sm" disabled={transactions.length < 100} onClick={() => setPage((p) => p + 1)}>Next</Button>
+                <Button variant="outline" size="sm" disabled={transactions.length < pageSize} onClick={() => setPage((p) => p + 1)}>Next</Button>
               </div>
             </div>
           </CardContent>
