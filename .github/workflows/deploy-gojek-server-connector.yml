@@ -1,0 +1,119 @@
+name: Deploy Gojek Server Connector
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "connector/gojek-server-connector/**"
+      - ".github/workflows/deploy-gojek-server-connector.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gojek-server-connector-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: fleet-dev
+    env:
+      SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+      SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+      SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+      GOJEK_CONNECTOR_SHARED_SECRET: ${{ secrets.GOJEK_CONNECTOR_SHARED_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS GOJEK_CONNECTOR_SHARED_SECRET; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Package connector
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C connector/gojek-server-connector -czf /tmp/gojek-server-connector.tgz .
+          cat > /tmp/gojek-server-connector.env <<EOF
+          FLEET_BASE_URL=https://fleet.cstlogistic.co.id
+          GOJEK_CONNECTOR_SHARED_SECRET=$GOJEK_CONNECTOR_SHARED_SECRET
+          GOJEK_SERVER_CONNECTOR_TOKEN=$GOJEK_CONNECTOR_SHARED_SECRET
+          GOJEK_FLEET_PORTAL_URL=https://fleetpartner.gojek.com
+          GOJEK_CONNECTOR_ALLOWED_HOST=fleetpartner.gojek.com
+          PORT=8080
+          EOF
+          chmod 600 /tmp/gojek-server-connector.env
+
+      - name: Upload connector
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -P "$SSH_PORT" /tmp/gojek-server-connector.tgz "$SSH_USER@$SSH_HOST:/tmp/gojek-server-connector.tgz"
+          scp -P "$SSH_PORT" /tmp/gojek-server-connector.env "$SSH_USER@$SSH_HOST:/tmp/gojek-server-connector.env"
+
+      - name: Deploy connector container
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          deploy_dir="$HOME/cst-gojek-server-connector"
+          mkdir -p "$deploy_dir"
+          rm -rf "$deploy_dir/src" "$deploy_dir/package.json" "$deploy_dir/Dockerfile" "$deploy_dir/README.md"
+          tar -xzf /tmp/gojek-server-connector.tgz -C "$deploy_dir"
+          mv /tmp/gojek-server-connector.env "$deploy_dir/.env"
+          chmod 600 "$deploy_dir/.env"
+          rm -f /tmp/gojek-server-connector.tgz
+
+          cd "$deploy_dir"
+          docker build -t cst-gojek-server-connector:latest .
+          docker rm -f cst-gojek-server-connector >/dev/null 2>&1 || true
+          docker run -d             --name cst-gojek-server-connector             --restart unless-stopped             --env-file "$deploy_dir/.env"             -p 18082:8080             cst-gojek-server-connector:latest
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18082/health >/tmp/gojek-health.json; then
+              cat /tmp/gojek-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs --tail=150 cst-gojek-server-connector || true
+          exit 21
+          REMOTE
+
+      - name: Verify public connector health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --connect-timeout 10 --max-time 20 "http://$SSH_HOST:18082/health" | tee /tmp/public-health.json
+          node - <<'NODE'
+          const fs=require("fs");
+          const p=JSON.parse(fs.readFileSync("/tmp/public-health.json","utf8"));
+          if(p.ok!==true || p.service!=="cst-gojek-server-connector"){
+            throw new Error("Unexpected connector health payload");
+          }
+          console.log("gojek_server_connector=PASS");
+          NODE
