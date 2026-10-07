@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
+import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -14,6 +15,57 @@ import {
 } from "../lib/central-finance-client";
 
 const router = Router();
+
+function connectorSecretMatches(value: unknown): boolean {
+  const expected = String(process.env.GOJEK_CONNECTOR_SHARED_SECRET ?? "").trim();
+  const supplied = String(value ?? "").trim();
+  if (!expected || !supplied) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(supplied);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Server-to-server receiver for an official Fleet Partner export.
+// This endpoint deliberately does not accept or store Gojek credentials.
+router.post("/gojek-connector/handoff", async (req, res) => {
+  try {
+    const cfg = getGojekConnectorConfig();
+    if (!cfg.enabled) {
+      res.status(409).json({ error: "Gojek connector belum diaktifkan." });
+      return;
+    }
+    if (!cfg.sharedSecretConfigured || !connectorSecretMatches(req.get("x-gojek-connector-secret"))) {
+      res.status(401).json({ error: "Connector handoff tidak terautentikasi." });
+      return;
+    }
+
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    const fileName = typeof req.body?.fileName === "string"
+      ? req.body.fileName.trim().slice(0, 255)
+      : "gojek-export.csv";
+    const sizeBytes = Buffer.byteLength(content, "utf8");
+    if (!content.trim()) {
+      res.status(400).json({ error: "File export CSV kosong." });
+      return;
+    }
+    if (sizeBytes > cfg.maxFileMb * 1024 * 1024) {
+      res.status(413).json({ error: `File melebihi batas ${cfg.maxFileMb} MB.` });
+      return;
+    }
+
+    const result = await importGojekConnectorCsv({
+      companyId: cfg.companyId,
+      content,
+      fileName,
+      actor: "gojek-connector",
+    });
+    res.status(201).json({ ok: true, ...result });
+  } catch (error) {
+    req.log.error({ error }, "Gojek connector handoff failed");
+    const message = error instanceof Error ? error.message : "Gagal memproses export Gojek.";
+    res.status(message.includes("sudah pernah") ? 409 : 500).json({ error: message });
+  }
+});
 
 router.use((req, res, next) => {
   void authenticateAdmin(req as AdminRequest, res, next);
