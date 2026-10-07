@@ -1,0 +1,68 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawnSync, spawn } from "node:child_process";
+import readline from "node:readline";
+
+const here=path.dirname(new URL(import.meta.url).pathname.replace(/^\/(.:)/,"$1"));
+const target=path.join(process.env.LOCALAPPDATA || os.homedir(),"CSTFleetWatcher");
+fs.mkdirSync(target,{recursive:true});
+
+async function hiddenPrompt(label){
+  process.stdout.write(label);
+  readline.emitKeypressEvents(process.stdin);
+  if(process.stdin.isTTY) process.stdin.setRawMode(true);
+  return await new Promise((resolve)=>{
+    let value="";
+    const onKey=(str,key)=>{
+      if(key?.ctrl&&key.name==="c"){process.exit(130);}
+      if(key?.name==="return"){
+        if(process.stdin.isTTY) process.stdin.setRawMode(false);
+        process.stdin.off("keypress",onKey);
+        process.stdout.write("\n");
+        resolve(value);
+      } else if(key?.name==="backspace"){
+        if(value.length){value=value.slice(0,-1);process.stdout.write("\b \b");}
+      } else if(str && !key?.ctrl && !key?.meta){
+        value+=str;process.stdout.write("*");
+      }
+    };
+    process.stdin.on("keypress",onKey);
+  });
+}
+
+const secret=await hiddenPrompt("Masukkan GOJEK_CONNECTOR_SHARED_SECRET dari Hostinger: ");
+if(!secret.trim()) throw new Error("Shared secret wajib diisi.");
+
+const ps=[
+  "$ErrorActionPreference='Stop'",
+  "$plain=[Console]::In.ReadToEnd()",
+  "$sec=ConvertTo-SecureString $plain -AsPlainText -Force",
+  "[Console]::Out.Write((ConvertFrom-SecureString $sec))"
+].join(";");
+const enc=spawnSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{
+  input:secret,encoding:"utf8",windowsHide:true
+});
+if(enc.status!==0) throw new Error("Gagal mengenkripsi secret dengan Windows DPAPI.");
+
+fs.copyFileSync(path.join(here,"watcher.mjs"),path.join(target,"watcher.mjs"));
+fs.writeFileSync(path.join(target,"config.json"),JSON.stringify({
+  fleetBaseUrl:"https://fleet.cstlogistic.co.id",
+  portalUrl:"https://fleetpartner.gojek.com",
+  controlPort:17891,
+  sharedSecretProtected:String(enc.stdout||"").trim()
+},null,2),"utf8");
+
+const vbs='Set sh = CreateObject("WScript.Shell")\r\nsh.Run """node"" """ & CreateObject("Scripting.FileSystemObject").BuildPath(CreateObject("WScript.Shell").ExpandEnvironmentStrings("%LOCALAPPDATA%"), "CSTFleetWatcher\\watcher.mjs") & """", 0, False\r\n';
+fs.writeFileSync(path.join(target,"start-hidden.vbs"),vbs,"utf8");
+
+const startup=path.join(process.env.APPDATA,"Microsoft","Windows","Start Menu","Programs","Startup","CST Fleet Watcher.vbs");
+fs.copyFileSync(path.join(target,"start-hidden.vbs"),startup);
+
+spawn("wscript.exe",[path.join(target,"start-hidden.vbs")],{detached:true,windowsHide:true,stdio:"ignore"}).unref();
+
+console.log("");
+console.log("CST Fleet Watcher berhasil dipasang.");
+console.log("Watcher akan otomatis hidup setiap Windows login.");
+console.log("Sekarang buka CST Fleet > Gojek Connector > Refresh.");
+console.log("Status lokal harus menjadi Terhubung.");
