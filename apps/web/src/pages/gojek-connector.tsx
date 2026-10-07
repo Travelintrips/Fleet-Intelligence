@@ -27,6 +27,7 @@ const LOCAL_BRIDGE = "http://127.0.0.1:17891";
 
 export default function GojekConnectorPage() {
   const [bridgeStatus, setBridgeStatus] = useState<"checking"|"online"|"offline">("checking");
+  const [watcherVersion, setWatcherVersion] = useState<string | null>(null);
   const { data, isLoading, refetch, isFetching } = useQuery<ConnectorStatus>({
     queryKey: ["fleet-gojek-connector-status"],
     queryFn: async () => {
@@ -42,11 +43,14 @@ export default function GojekConnectorPage() {
     setBridgeStatus("checking");
     try {
       const res = await fetch(`${LOCAL_BRIDGE}/health`, { method: "GET", cache: "no-store" });
-      if (!res.ok) throw new Error("Bridge tidak merespons");
+      if (!res.ok) throw new Error("Watcher tidak merespons");
+      const payload = await res.json().catch(() => ({}));
+      setWatcherVersion(typeof payload.version === "string" ? payload.version : "legacy");
       setBridgeStatus("online");
       if (showToast) toast.success("watcher lokal terhubung.");
       return true;
     } catch {
+      setWatcherVersion(null);
       setBridgeStatus("offline");
       if (showToast) toast.error("watcher lokal belum berjalan di PC ini.");
       return false;
@@ -99,7 +103,7 @@ export default function GojekConnectorPage() {
             ["Receiver", data?.ready ? "Siap" : "Belum Siap", data?.ready ? "text-emerald-300" : "text-amber-300"],
             ["Credential Gojek", data?.loginCredentialConfigured ? "Hostinger Secret" : "Belum Diset", data?.loginCredentialConfigured ? "text-emerald-300" : "text-amber-300"],
             ["File Export", data?.fileRetention === "none" ? "Tidak Disimpan" : "Temporary", "text-emerald-300"],
-            ["Watcher Lokal", bridgeStatus === "online" ? "Terhubung" : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
+            ["Watcher Lokal", bridgeStatus === "online" ? `Terhubung${watcherVersion ? ` · v${watcherVersion}` : ""}` : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
           ].map(([label,value,cls]) => (
             <Card key={label} className="border-white/[0.07] bg-slate-900/70">
               <CardContent className="p-4">

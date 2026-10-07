@@ -123,7 +123,7 @@ const server=http.createServer((req,res)=>{
   if(req.method==="OPTIONS"){res.writeHead(204);res.end();return;}
   if(req.method==="GET"&&req.url==="/health"){
     res.writeHead(200,{"Content-Type":"application/json"});
-    res.end(JSON.stringify({ok:true,watcher:"cst-fleet-download-watcher",downloadDir}));
+    res.end(JSON.stringify({ok:true,watcher:"cst-fleet-download-watcher",version:"3",downloadDir}));
     return;
   }
   if(req.method==="POST"&&req.url==="/open"){
@@ -132,4 +132,7 @@ const server=http.createServer((req,res)=>{
   }
   res.writeHead(404);res.end();
 });
-server.listen(controlPort,"127.0.0.1",()=>log(`Watcher aktif di 127.0.0.1:${controlPort}; folder=${downloadDir}`));
+server.listen(controlPort,"127.0.0.1",()=>{
+  try { fs.writeFileSync(path.join(baseDir,"watcher.pid"),String(process.pid),"utf8"); } catch {}
+  log(`Watcher v3 aktif pid=${process.pid} di 127.0.0.1:${controlPort}; folder=${downloadDir}`);
+});

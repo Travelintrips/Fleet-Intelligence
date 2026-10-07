@@ -8,6 +8,33 @@ const here=path.dirname(new URL(import.meta.url).pathname.replace(/^\/(.:)/,"$1"
 const target=path.join(process.env.LOCALAPPDATA || os.homedir(),"CSTFleetWatcher");
 fs.mkdirSync(target,{recursive:true});
 
+function stopExistingWatcher() {
+  const pidPath=path.join(target,"watcher.pid");
+  if (fs.existsSync(pidPath)) {
+    const pid=Number(fs.readFileSync(pidPath,"utf8").trim());
+    if (Number.isInteger(pid) && pid>0) {
+      spawnSync("taskkill",["/PID",String(pid),"/F"],{windowsHide:true,stdio:"ignore"});
+    }
+    try { fs.rmSync(pidPath,{force:true}); } catch {}
+  }
+
+  // Compatibility with v1/v2, which did not create watcher.pid.
+  // Port 17891 is reserved for the CST Fleet watcher local control endpoint.
+  const net=spawnSync("cmd.exe",["/c","netstat -ano -p tcp | findstr LISTENING | findstr :17891"],{
+    encoding:"utf8",windowsHide:true
+  });
+  const lines=String(net.stdout||"").split(/\r?\n/).filter(Boolean);
+  for (const line of lines) {
+    const match=line.trim().match(/\s(\d+)$/);
+    const pid=match ? Number(match[1]) : 0;
+    if (Number.isInteger(pid) && pid>0) {
+      spawnSync("taskkill",["/PID",String(pid),"/F"],{windowsHide:true,stdio:"ignore"});
+    }
+  }
+}
+
+stopExistingWatcher();
+
 async function hiddenPrompt(label){
   process.stdout.write(label);
   readline.emitKeypressEvents(process.stdin);
@@ -62,7 +89,7 @@ fs.copyFileSync(path.join(target,"start-hidden.vbs"),startup);
 spawn("wscript.exe",[path.join(target,"start-hidden.vbs")],{detached:true,windowsHide:true,stdio:"ignore"}).unref();
 
 console.log("");
-console.log("CST Fleet Watcher berhasil dipasang.");
+console.log("CST Fleet Watcher v3 berhasil dipasang.");
 console.log("Watcher akan otomatis hidup setiap Windows login.");
 console.log("Sekarang buka CST Fleet > Gojek Connector > Refresh.");
 console.log("Status lokal harus menjadi Terhubung.");
