@@ -1,5 +1,5 @@
 import { pool } from "./db";
-import { normalizeFleetPhone, sendFleetWa } from "./wa-gateway-client";
+import { getFleetWaGatewayStatus, normalizeFleetPhone, sendFleetWa } from "./wa-gateway-client";
 
 type ReminderRow = {
   id: number;
@@ -236,10 +236,12 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     company_id: number;
     auto_blast_hour: number | null;
     auto_blast_last_run: string | Date | null;
+    last_attempt_at: string | Date | null;
   }>(
-    `SELECT company_id,auto_blast_hour,auto_blast_last_run
-       FROM public.fleet_settings
-      WHERE auto_blast_enabled=true`,
+    `SELECT s.company_id,s.auto_blast_hour,s.auto_blast_last_run,w.last_attempt_at
+       FROM public.fleet_settings s
+       LEFT JOIN public.fleet_wa_worker_state w ON w.company_id=s.company_id
+      WHERE s.auto_blast_enabled=true`,
   );
 
   for (const row of settings.rows) {
@@ -255,7 +257,34 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
       : null;
 
     if (hourWib < configuredHour || lastRunDate === dateWib) continue;
-    await updateWorkerState(companyId, { attempt: true });
+
+    const lastAttemptMs = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : 0;
+    const retryBackoffMs = 30 * 60 * 1000;
+    if (lastAttemptMs && Date.now() - lastAttemptMs < retryBackoffMs) continue;
+
+    const wa = await getFleetWaGatewayStatus().catch(() => null);
+    const waReady = Boolean(
+      wa?.configured &&
+      wa?.gatewayHealthy &&
+      wa?.deviceId &&
+      wa?.deviceStatus === "ONLINE"
+    );
+    if (!waReady) {
+      await updateWorkerState(companyId, {
+        attempt: true,
+        senderDevice: wa?.deviceId ?? null,
+        deviceStatus: wa?.deviceStatus ?? null,
+        error: `WA Fleet belum siap (gateway=${wa?.gatewayStatus ?? "UNREACHABLE"}, device=${wa?.deviceId ?? "belum diset"}, status=${wa?.deviceStatus ?? "UNKNOWN"}).`,
+      });
+      continue;
+    }
+
+    await updateWorkerState(companyId, {
+      attempt: true,
+      senderDevice: wa?.deviceId ?? null,
+      deviceStatus: wa?.deviceStatus ?? null,
+      error: null,
+    });
 
     const claimed = await pool.query(
       `UPDATE public.fleet_settings
@@ -284,8 +313,18 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
         senderDevice: result.senderDevice ?? null,
         deviceStatus: result.deviceStatus ?? null,
         result,
-        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim.` : null,
+        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim: ${result.lastError ?? "provider error"}` : null,
       });
+
+      if (result.failed > 0) {
+        await pool.query(
+          `UPDATE public.fleet_settings
+              SET auto_blast_last_run=NULL,updated_at=NOW()
+            WHERE company_id=$1`,
+          [companyId],
+        ).catch(() => undefined);
+      }
+
       output.push(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
