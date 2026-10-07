@@ -260,7 +260,12 @@ export default function FleetOutstandingPage() {
   const [activeTab, setActiveTab] = useState<"list" | "upload">("list");
 
   /* list tab state */
-  const [status, setStatus] = useState("open");
+  const initialParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const [status, setStatus] = useState(initialParams.get("status") === "resolved" ? "resolved" : "open");
+  const [minOutstanding, setMinOutstanding] = useState(() => {
+    const value = Number(initialParams.get("minOutstanding") ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  });
   const [resolving, setResolving] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [waPreview, setWaPreview] = useState<WaPreview | null>(null);
@@ -270,8 +275,12 @@ export default function FleetOutstandingPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [waBlastOpen, setWaBlastOpen] = useState(false);
 
-  const [sortCol, setSortCol] = useState<"driver_name" | "rental_fee_daily" | "outstanding_amount" | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortCol, setSortCol] = useState<"driver_name" | "rental_fee_daily" | "outstanding_amount" | null>(
+    initialParams.get("sort") === "outstanding_desc" ? "outstanding_amount" : null,
+  );
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(
+    initialParams.get("sort") === "outstanding_desc" ? "desc" : "asc",
+  );
   const [plateFilter, setPlateFilter] = useState<"all" | "has_plate" | "no_plate">("all");
   const [search, setSearch] = useState("");
 
@@ -612,6 +621,7 @@ export default function FleetOutstandingPage() {
     const hasPlate = plate && plate !== "-";
     if (plateFilter === "has_plate" && !hasPlate) return false;
     if (plateFilter === "no_plate" && hasPlate) return false;
+    if (minOutstanding > 0 && parseFloat(String(o.outstanding_amount ?? 0)) < minOutstanding) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const name = String(o.driver_name ?? "").toLowerCase();
@@ -727,6 +737,37 @@ export default function FleetOutstandingPage() {
             </div>
           )}
         </div>
+
+        {minOutstanding > 0 && activeTab === "list" && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-4 w-4 text-red-300" />
+              <div>
+                <div className="text-sm font-semibold text-red-200">
+                  Filter dari Dashboard: Outstanding ≥ {fmtIdr(minOutstanding)}
+                </div>
+                <div className="text-xs text-slate-400">
+                  Menampilkan {filteredList.length} driver yang sesuai dari data {status === "open" ? "belum lunas" : "sudah lunas"}.
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 border-red-400/20 text-red-200 hover:bg-red-500/10"
+              onClick={() => {
+                setMinOutstanding(0);
+                setSortCol(null);
+                setSortDir("asc");
+                if (typeof window !== "undefined") {
+                  window.history.replaceState({}, "", "/logistics/fleet-intelligence/outstanding?status=" + status);
+                }
+              }}
+            >
+              Hapus Filter
+            </Button>
+          </div>
+        )}
 
         {/* ── Tabs ───────────────────────────────────────────────────── */}
         <div className="flex gap-1 bg-slate-800/60 border border-slate-700 rounded-lg p-1 w-fit">
