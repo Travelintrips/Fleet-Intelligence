@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../lib/db", () => ({
+  pool: { query: vi.fn() },
+}));
 import {
   getFleetAccountingSettings,
   postFleetCashPayment,
