@@ -99,6 +99,13 @@ describe("Fleet production hardening contract", () => {
     expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
+  it("provides a non-mutating authenticated Gojek connector dry-run", () => {
+    expect(route).toContain('router.post("/gojek-connector/dry-run"');
+    expect(route).toContain("persisted: false");
+    expect(route).toContain("database: \"ready\"");
+    expect(route).toContain("detectGojekExportType");
+  });
+
   it("exposes Gojek login only to authenticated bridge runtime", () => {
     expect(route).toContain('router.get("/gojek-connector/runtime-credentials"');
     expect(route).toContain("x-gojek-connector-secret");
