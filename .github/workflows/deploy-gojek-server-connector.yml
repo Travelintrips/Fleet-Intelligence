@@ -50,6 +50,29 @@ jobs:
           ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - name: Diagnose SSH connectivity
+        shell: bash
+        run: |
+          set +e
+          ssh -vvv -o BatchMode=yes -o ConnectTimeout=10 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo SSH_OK"             > /tmp/ssh-test.out 2> /tmp/ssh-test.err
+          code=$?
+          {
+            echo "exit_code=$code"
+            echo "--- stdout ---"
+            cat /tmp/ssh-test.out
+            echo "--- stderr ---"
+            sed -E 's/(BEGIN|END) OPENSSH PRIVATE KEY/REDACTED/g' /tmp/ssh-test.err
+          } > /tmp/ssh-diagnostic.txt
+          exit $code
+
+      - name: Upload SSH diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gojek-ssh-diagnostic
+          path: /tmp/ssh-diagnostic.txt
+          if-no-files-found: warn
+
       - name: Package connector
         shell: bash
         run: |
