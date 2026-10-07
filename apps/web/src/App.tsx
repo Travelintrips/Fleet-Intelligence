@@ -2,6 +2,7 @@ import React from "react";
 import { Redirect, Route, Switch } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
+import WhatsApp from "@/pages/whatsapp";
 
 const Dashboard = React.lazy(() => import("@/pages/index"));
 const Upload = React.lazy(() => import("@/pages/upload"));
@@ -23,7 +24,6 @@ const Pipeline = React.lazy(() => import("@/pages/pipeline-monitor"));
 const DriverMacet = React.lazy(() => import("@/pages/driver-macet"));
 const Macet = React.lazy(() => import("@/pages/macet"));
 const CashPayments = React.lazy(() => import("@/pages/cash-payments"));
-const WhatsApp = React.lazy(() => import("@/pages/whatsapp"));
 const GojekConnector = React.lazy(() => import("@/pages/gojek-connector"));
 
 const queryClient = new QueryClient({
