@@ -1077,6 +1077,31 @@ router.post("/outstanding/snapshot/confirm", async (req: AdminRequest, res) => {
 });
 
 
+router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
+  try {
+    companyId(req);
+    const cfg = getGojekConnectorConfig();
+    res.json({
+      enabled: cfg.enabled,
+      mode: cfg.mode,
+      portalUrl: cfg.portalUrl,
+      allowedHost: cfg.allowedHost,
+      ready: cfg.enabled && cfg.sharedSecretConfigured,
+      sharedSecretConfigured: cfg.sharedSecretConfigured,
+      encryptionKeyConfigured: cfg.encryptionKeyConfigured,
+      maxFileMb: cfg.maxFileMb,
+      retentionHours: cfg.retentionHours,
+      credentialStorage: "disabled",
+      fileRetention: "none",
+      handoffEndpoint: "/api/logistics/fleet/gojek-connector/handoff",
+      automationPolicy: "official-export-no-stealth-no-bypass",
+    });
+  } catch (error) {
+    req.log.error({ error }, "Gojek connector status failed");
+    res.status(503).json({ error: error instanceof Error ? error.message : "Gagal membaca status Gojek connector." });
+  }
+});
+
 router.get("/wa/status", async (req: AdminRequest, res) => {
   try {
     companyId(req);
