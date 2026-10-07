@@ -53,3 +53,24 @@ Bridge sengaja berada di luar root npm workspace agar dependency Playwright tida
 ## Hostinger production note
 
 File manifest bridge sengaja bernama `package.bridge.json`, bukan `package.json`, agar Hostinger hanya mendeteksi aplikasi Fleet utama di root repository. Saat bridge dijalankan di mesin/VM connector, copy manifest ini menjadi `package.json` terlebih dahulu seperti contoh di atas.
+
+
+## Simpan login lokal secara terenkripsi (Windows)
+
+Jalankan sekali pada PC/VM bridge:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-credentials.ps1
+```
+
+Script akan meminta email dan password Fleet Partner. Password disimpan dengan **Windows DPAPI** di:
+
+```
+%LOCALAPPDATA%\CSTFleet\gojek-credentials.json
+```
+
+Password tidak disimpan plaintext dan hanya dapat didekripsi oleh user Windows yang menyimpannya pada mesin tersebut.
+
+Saat bridge dijalankan, ia mencoba mendeteksi form login dan mengisi email/password otomatis. Jika Gojek menampilkan OTP, CAPTCHA, atau challenge tambahan, selesaikan secara manual. Bridge tidak membypass challenge tersebut.
+
+Untuk mengganti credential, jalankan kembali `setup-credentials.ps1`.
