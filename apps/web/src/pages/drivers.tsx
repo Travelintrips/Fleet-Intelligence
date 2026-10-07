@@ -139,7 +139,7 @@ export default function FleetDriversPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-700">
                   <tr>
-                    {["ID External", "Nama Driver", "Plat", "Rental/Hari", "Kepemilikan Unit", "Status", "Terakhir Aktif", "Transaksi", "Total Rental", "Outstanding", "Tier", ""].map((h) => (
+                    {["ID External", "Nama Driver", "No. WhatsApp", "Plat", "Rental/Hari", "Kepemilikan Unit", "Status", "Terakhir Aktif", "Transaksi", "Total Rental", "Outstanding", "Tier", ""].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -148,12 +148,12 @@ export default function FleetDriversPage() {
                   {isLoading
                     ? Array.from({ length: 8 }).map((_, i) => (
                         <tr key={i} className="border-b border-slate-700/50">
-                          <td colSpan={12} className="px-4 py-3"><div className="h-4 bg-slate-700 rounded animate-pulse" /></td>
+                          <td colSpan={13} className="px-4 py-3"><div className="h-4 bg-slate-700 rounded animate-pulse" /></td>
                         </tr>
                       ))
                     : drivers.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
+                          <td colSpan={13} className="px-4 py-12 text-center text-slate-500">
                             <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
                             <p>Belum ada data driver</p>
                           </td>
@@ -168,6 +168,7 @@ export default function FleetDriversPage() {
                           <tr key={extId || String(d.id)} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                             <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{extId || "—"}</td>
                             <td className="px-4 py-3 font-medium text-white whitespace-nowrap">{String(d.name ?? "—")}</td>
+                            <td className="px-4 py-3 text-slate-300 font-mono text-xs whitespace-nowrap">{String(d.phone ?? "—")}</td>
                             <td className="px-4 py-3 text-slate-300 font-mono text-xs whitespace-nowrap">{String(d.vehicle_plate ?? "—")}</td>
                             <td className="px-4 py-3 text-right text-slate-300 tabular-nums whitespace-nowrap">{fmtIdr(d.rental_fee_daily)}</td>
                             <td className="px-4 py-3 text-slate-300 text-xs whitespace-nowrap">{ownershipLabel(d.vehicle_ownership)}</td>
@@ -197,7 +198,7 @@ export default function FleetDriversPage() {
                                   </Button>
                                 </Link>
                                 {hasId && (
-                                  <Button variant="ghost" size="sm" onClick={() => setEditing(d)} className="h-7 w-7 p-0 text-slate-400 hover:text-white" title="Edit">
+                                  <Button variant="ghost" size="sm" onClick={() => setEditing(d)} className="h-7 w-7 p-0 text-slate-400 hover:text-white" title="Edit data & nomor WhatsApp">
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </Button>
                                 )}
