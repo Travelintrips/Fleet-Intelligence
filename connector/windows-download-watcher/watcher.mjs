@@ -137,7 +137,7 @@ setInterval(() => {
   }
 },2000);
 
-const server=http.createServer((req,res)=>{
+const server=http.createServer(async (req,res)=>{
   res.setHeader("Access-Control-Allow-Origin","https://fleet.cstlogistic.co.id");
   res.setHeader("Access-Control-Allow-Methods","GET,POST,OPTIONS");
   res.setHeader("Cache-Control","no-store");
