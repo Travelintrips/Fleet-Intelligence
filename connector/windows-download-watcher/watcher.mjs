@@ -37,6 +37,18 @@ const sharedSecret = decryptDpapi(config.sharedSecretProtected);
 const fleetBaseUrl = String(config.fleetBaseUrl || "https://fleet.cstlogistic.co.id").replace(/\/$/,"");
 const portalUrl = String(config.portalUrl || "https://fleetpartner.gojek.com");
 const controlPort = Number(config.controlPort || 17891);
+const state = {
+  version: "final-1",
+  startedAt: new Date().toISOString(),
+  lastScanAt: null,
+  lastDetectedFile: null,
+  lastImportAt: null,
+  lastImportFile: null,
+  lastImportType: null,
+  lastError: null,
+  successfulImports: 0,
+  failedImports: 0,
+};
 
 const seen = new Map();
 const pending = new Map();
@@ -55,6 +67,7 @@ for (const name of fs.readdirSync(downloadDir)) {
 
 async function handoff(filePath) {
   const content = fs.readFileSync(filePath,"utf8");
+  state.lastDetectedFile = path.basename(filePath);
   const fileName = path.basename(filePath);
   const response = await fetch(`${fleetBaseUrl}/api/logistics/fleet/gojek-connector/handoff`, {
     method:"POST",
@@ -67,7 +80,12 @@ async function handoff(filePath) {
   });
   const payload = await response.json().catch(()=>({}));
   if (response.ok) {
-    log(`IMPORT OK ${fileName} type=${payload.exportType || payload.type || "unknown"}`);
+    state.successfulImports += 1;
+    state.lastImportAt = new Date().toISOString();
+    state.lastImportFile = fileName;
+    state.lastImportType = payload.exportType || payload.type || "unknown";
+    state.lastError = null;
+    log(`IMPORT OK ${fileName} type=${state.lastImportType}`);
     fs.rmSync(filePath,{force:true});
     return;
   }
@@ -81,6 +99,7 @@ async function handoff(filePath) {
 }
 
 setInterval(() => {
+  state.lastScanAt = new Date().toISOString();
   let names=[];
   try { names=fs.readdirSync(downloadDir); } catch { return; }
   for (const name of names) {
@@ -110,7 +129,9 @@ setInterval(() => {
     if (cur.stable < 2) continue;
     cur.busy=true;
     void handoff(p).then(()=>pending.delete(p)).catch((e)=>{
-      log(`IMPORT FAIL ${name}: ${e instanceof Error?e.message:String(e)}`);
+      state.failedImports += 1;
+      state.lastError = e instanceof Error ? e.message : String(e);
+      log(`IMPORT FAIL ${name}: ${state.lastError}`);
       cur.busy=false; cur.stable=0;
     });
   }
@@ -123,9 +144,53 @@ const server=http.createServer((req,res)=>{
   if(req.method==="OPTIONS"){res.writeHead(204);res.end();return;}
   if(req.method==="GET"&&req.url==="/health"){
     res.writeHead(200,{"Content-Type":"application/json"});
-    res.end(JSON.stringify({ok:true,watcher:"cst-fleet-download-watcher",version:"3",downloadDir}));
+    res.end(JSON.stringify({ok:true,watcher:"cst-fleet-download-watcher",version:state.version,downloadDir,...state}));
     return;
   }
+  if(req.method==="POST"&&req.url==="/self-test"){
+    const probePath = path.join(downloadDir,".cst-fleet-watcher-probe");
+    try {
+      fs.writeFileSync(probePath,"probe","utf8");
+      fs.rmSync(probePath,{force:true});
+
+      const sample = [
+        "Driver Name,Phone Number,License Plate,Rental fee (Daily),Outstanding,Status",
+        "SELF TEST,628123456789,B1234XYZ,5000,10000,Active"
+      ].join("\n");
+
+      const response = await fetch(`${fleetBaseUrl}/api/logistics/fleet/gojek-connector/dry-run`, {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-gojek-connector-secret": sharedSecret,
+        },
+        body:JSON.stringify({fileName:"watcher-self-test.csv",content:sample}),
+        signal:AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+
+      res.writeHead(200,{"Content-Type":"application/json"});
+      res.end(JSON.stringify({
+        ok:true,
+        watcherVersion:state.version,
+        downloadDir,
+        downloadWritable:true,
+        serverAuthenticated:true,
+        database:payload.database,
+        parserType:payload.exportType,
+        parserRows:payload.rowCount,
+        persisted:payload.persisted,
+      }));
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      state.lastError=message;
+      res.writeHead(500,{"Content-Type":"application/json"});
+      res.end(JSON.stringify({ok:false,error:message,watcherVersion:state.version,downloadDir}));
+    }
+    return;
+  }
+
   if(req.method==="POST"&&req.url==="/open"){
     spawn("cmd.exe",["/c","start","",portalUrl],{detached:true,windowsHide:true,stdio:"ignore"}).unref();
     res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({ok:true}));return;
@@ -134,5 +199,5 @@ const server=http.createServer((req,res)=>{
 });
 server.listen(controlPort,"127.0.0.1",()=>{
   try { fs.writeFileSync(path.join(baseDir,"watcher.pid"),String(process.pid),"utf8"); } catch {}
-  log(`Watcher v3 aktif pid=${process.pid} di 127.0.0.1:${controlPort}; folder=${downloadDir}`);
+  log(`Watcher ${state.version} aktif pid=${process.pid} di 127.0.0.1:${controlPort}; folder=${downloadDir}`);
 });

@@ -27,6 +27,52 @@ function connectorSecretMatches(value: unknown): boolean {
 
 // Server-to-server receiver for an official Fleet Partner export.
 // This endpoint deliberately does not accept or store Gojek credentials.
+router.post("/gojek-connector/dry-run", async (req, res) => {
+  try {
+    const cfg = getGojekConnectorConfig();
+    if (!cfg.enabled) {
+      res.status(409).json({ error: "Gojek connector belum diaktifkan." });
+      return;
+    }
+    if (!cfg.sharedSecretConfigured || !connectorSecretMatches(req.get("x-gojek-connector-secret"))) {
+      res.status(401).json({ error: "Connector dry-run tidak terautentikasi." });
+      return;
+    }
+
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    const fileName = typeof req.body?.fileName === "string"
+      ? req.body.fileName.trim().slice(0,255)
+      : "self-test.csv";
+    if (!content.trim()) {
+      res.status(400).json({ error: "CSV self-test kosong." });
+      return;
+    }
+
+    const exportType = detectGojekExportType(content);
+    let rowCount = 0;
+    if (exportType === "driver_snapshot") {
+      rowCount = parseSnapshotCsv(content).length;
+    } else {
+      rowCount = parseGojekTransactionCsv(content).rows.length;
+    }
+    await pool.query("SELECT 1");
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      dryRun: true,
+      exportType,
+      rowCount,
+      fileName,
+      database: "ready",
+      persisted: false,
+    });
+  } catch (error) {
+    req.log.error({ error }, "Gojek connector dry-run failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Dry-run gagal." });
+  }
+});
+
 router.post("/gojek-connector/handoff", async (req, res) => {
   try {
     const cfg = getGojekConnectorConfig();
