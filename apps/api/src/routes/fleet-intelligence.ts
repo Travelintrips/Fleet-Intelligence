@@ -320,6 +320,142 @@ function summarizeGojekRows(rows:GojekTransactionRow[]) {
   return {transactionCount:rows.length,totalCredit,totalDebit,netFlow:totalCredit+totalDebit,vehicleCoverage:vehicles.size,driverCoverage:drivers.size,typeBreakdown};
 }
 
+
+async function importGojekConnectorCsv(args: {
+  companyId: number;
+  content: string;
+  fileName: string;
+  actor: string;
+}) {
+  const parsed = parseGojekTransactionCsv(args.content);
+  const fileHash = createHash("sha256").update(args.content).digest("hex");
+  const client = await pool.connect();
+
+  try {
+    const dup = await client.query(
+      "SELECT id,original_filename,status FROM public.fleet_reports WHERE company_id=$1 AND file_hash=$2 ORDER BY id DESC LIMIT 1",
+      [args.companyId, fileHash],
+    );
+    if (dup.rows[0]) {
+      throw new Error(`File export ini sudah pernah diproses (report #${dup.rows[0].id}).`);
+    }
+
+    await client.query("BEGIN");
+    const dates = parsed.rows.map((r) => r.txDate).filter(Boolean).sort();
+    const report = await client.query<{ id: number }>(
+      `INSERT INTO public.fleet_reports(
+         company_id,partner_id,filename,original_filename,file_hash,report_type,
+         period_start,period_end,status,row_count,processed_count,error_count,
+         uploaded_by,uploaded_by_email,column_mapping,summary_stats,created_at,updated_at
+       )
+       VALUES($1,NULL,$2,$2,$3,'gojek_driver',$4,$5,'processing',$6,0,0,$7,$7,$8::jsonb,$9::jsonb,NOW(),NOW())
+       RETURNING id`,
+      [
+        args.companyId,
+        args.fileName,
+        fileHash,
+        dates[0] ?? null,
+        dates.at(-1) ?? null,
+        parsed.rows.length,
+        args.actor,
+        JSON.stringify(parsed.mapping),
+        JSON.stringify(summarizeGojekRows(parsed.rows)),
+      ],
+    );
+    const reportId = report.rows[0].id;
+
+    let rawInserted = 0;
+    let successRows = 0;
+    let failedRows = 0;
+
+    for (let i = 0; i < parsed.rows.length; i += 1) {
+      const row = parsed.rows[i];
+      const raw = await client.query<{ id: number }>(
+        `INSERT INTO public.gojek_raw_transactions(
+           company_id,report_id,date_time_jkt,driver_external_id,driver_name,phone_number,
+           vehicle,amount,total_outstanding_balance,transaction_type,gopay_transaction_reference_id,
+           date,raw_json,service_type,driver_phone,vehicle_plate,date_iso
+         )
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13::jsonb,$14,$6,$7,$15::date)
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [
+          args.companyId, reportId,
+          row.raw[parsed.mapping.txDate ?? ""] ?? row.txDate,
+          row.driverExtId || null, row.driverName, row.driverPhone || null, row.vehiclePlate || null,
+          row.amount, row.outstanding, row.transactionType || null, row.gopayRef,
+          row.txDate || null, JSON.stringify(row.raw), row.serviceType || null, row.txDate || null,
+        ],
+      );
+      if (!raw.rows[0]?.id) continue;
+      rawInserted += 1;
+
+      if (!row.txDate) {
+        await client.query(
+          `INSERT INTO public.gojek_failed_rows(
+             report_id,company_id,raw_row_id,row_index,error_reason,error_stage,raw_data
+           ) VALUES($1,$2,$3,$4,'Tanggal transaksi tidak dapat diparse','transform',$5::jsonb)`,
+          [reportId, args.companyId, raw.rows[0].id, i + 2, JSON.stringify(row.raw)],
+        );
+        failedRows += 1;
+        continue;
+      }
+
+      try {
+        await client.query(
+          `INSERT INTO public.fleet_transactions(
+             company_id,report_id,driver_external_id,driver_name,vehicle_plate,transaction_date,
+             trip_count,gross_revenue,incentive,commission,deduction,net_revenue,
+             outstanding_balance,service_type,raw_data,amount,transaction_type,driver_phone,gopay_reference_id
+           )
+           VALUES($1,$2,$3,$4,$5,$6,0,GREATEST($7,0),0,0,0,$7,$8,$9,$10::jsonb,$7,$11,$12,NULLIF($13,''))
+           ON CONFLICT DO NOTHING`,
+          [
+            args.companyId, reportId, row.driverExtId || null, row.driverName, row.vehiclePlate || null,
+            row.txDate, row.amount, row.outstanding, row.serviceType || null, JSON.stringify(row.raw),
+            row.transactionType || null, row.driverPhone || null, row.gopayRef,
+          ],
+        );
+        successRows += 1;
+      } catch (rowError) {
+        await client.query(
+          `INSERT INTO public.gojek_failed_rows(
+             report_id,company_id,raw_row_id,row_index,error_reason,error_stage,raw_data
+           ) VALUES($1,$2,$3,$4,$5,'transform',$6::jsonb)`,
+          [
+            reportId, args.companyId, raw.rows[0].id, i + 2,
+            rowError instanceof Error ? rowError.message : "Transform gagal",
+            JSON.stringify(row.raw),
+          ],
+        );
+        failedRows += 1;
+      }
+    }
+
+    const status = failedRows === 0 ? "done" : successRows > 0 ? "partial" : "error";
+    await client.query(
+      "UPDATE public.fleet_reports SET status=$2,processed_count=$3,error_count=$4,updated_at=NOW() WHERE id=$1",
+      [reportId, status, successRows, failedRows],
+    );
+    await client.query("COMMIT");
+
+    return {
+      reportId,
+      fileName: args.fileName,
+      rowCount: parsed.rows.length,
+      rawInserted,
+      successRows,
+      failedRows,
+      status,
+      fileRetained: false,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function assertFleetSchemaTables(names: string[]): Promise<void> {
   const result = await pool.query<{ name: string; exists: boolean }>(
     `SELECT name, to_regclass('public.' || name) IS NOT NULL AS exists
