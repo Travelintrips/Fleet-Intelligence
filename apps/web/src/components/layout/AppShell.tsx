@@ -13,6 +13,7 @@ import {
   Users,
   WalletCards,
   MessageCircle,
+  Link2,
 } from "lucide-react";
 
 const NAV = [
@@ -20,6 +21,7 @@ const NAV = [
   { label: "Drivers", href: "/logistics/fleet-intelligence/drivers", icon: Users },
   { label: "Vehicles", href: "/logistics/fleet-intelligence/vehicles", icon: Truck },
   { label: "Transactions", href: "/logistics/fleet-intelligence/transactions", icon: WalletCards },
+  { label: "Gojek Connector", href: "/logistics/fleet-intelligence/gojek-connector", icon: Link2 },
   { label: "Outstanding", href: "/logistics/fleet-intelligence/outstanding", icon: CircleDollarSign },
   { label: "Analytics", href: "/logistics/fleet-intelligence/analytics", icon: BarChart3 },
   { label: "Alerts", href: "/logistics/fleet-intelligence/alerts", icon: AlertTriangle },
