@@ -99,7 +99,7 @@ export default function FleetAlertsPage() {
                 <span className="text-sm font-normal px-2 py-0.5 bg-red-500 text-white rounded-full">{unread} belum dibaca</span>
               )}
             </h1>
-            <p className="text-slate-400 text-sm mt-1">Notifikasi otomatis dari sistem monitoring fleet</p>
+            <p className="text-slate-400 text-sm mt-1">Alert operasional otomatis · dievaluasi berkala dari data Fleet terbaru</p>
           </div>
           <div className="flex items-center gap-2">
             <Select value={isRead} onValueChange={(v) => { setIsRead(v); setPage(1); }}>
@@ -220,9 +220,9 @@ export default function FleetAlertsPage() {
             <h3 className="text-white font-medium mb-2 text-sm">Jenis Alert Otomatis</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
               {[
-                { icon: <AlertTriangle className="w-4 h-4 text-amber-400" />, title: "Outstanding Tinggi", desc: "Driver dengan saldo hutang ≥ Rp 500.000 — notifikasi WA ke admin + driver" },
-                { icon: <BellOff className="w-4 h-4 text-blue-400" />, title: "Driver Tidak Aktif", desc: "Driver tidak ada aktivitas selama ≥7 hari — notifikasi ke admin" },
-                { icon: <XCircle className="w-4 h-4 text-red-400" />, title: "Revenue Turun >15%", desc: "Pendapatan fleet turun >15% dibanding minggu sebelumnya — notifikasi critical" },
+                { icon: <AlertTriangle className="w-4 h-4 text-amber-400" />, title: "Outstanding Tinggi", desc: "Driver dengan saldo hutang ≥ Rp 500.000 — warning; ≥ Rp 1.000.000 menjadi critical" },
+                { icon: <BellOff className="w-4 h-4 text-blue-400" />, title: "Driver Tidak Aktif", desc: "Driver aktif tanpa aktivitas selama ≥7 hari — alert otomatis ke dashboard" },
+                { icon: <XCircle className="w-4 h-4 text-red-400" />, title: "Revenue Turun >15%", desc: "Revenue 7 hari turun >15% vs 7 hari sebelumnya; ≥30% menjadi critical" },
               ].map((item) => (
                 <div key={item.title} className="flex gap-2 p-3 bg-slate-900/40 rounded-lg">
                   <div className="mt-0.5">{item.icon}</div>
