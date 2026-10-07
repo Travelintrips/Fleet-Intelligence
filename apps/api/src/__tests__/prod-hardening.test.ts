@@ -59,6 +59,19 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain("Pesan test maksimal 2000 karakter");
   });
 
+  it("retries stale or disconnected WA device sends once", () => {
+    expect(waClient).toContain("for (let attempt = 0; attempt < 2; attempt += 1)");
+    expect(waClient).toContain("disconnected device");
+    expect(waClient).toContain("deviceSelectionCache = null");
+  });
+
+  it("keeps failed auto reminders eligible for safe retry", () => {
+    const reminder = readFileSync(resolve(process.cwd(), "src/lib/fleet-wa-reminder.ts"), "utf8");
+    expect(reminder).toContain("retryBackoffMs = 30 * 60 * 1000");
+    expect(reminder).toContain("getFleetWaGatewayStatus()");
+    expect(reminder).toContain("SET auto_blast_last_run=NULL");
+  });
+
   it("exposes non-secret WA gateway and device health", () => {
     expect(route).toContain('router.get("/wa/status"');
     expect(waClient).toContain("getFleetWaGatewayStatus");
