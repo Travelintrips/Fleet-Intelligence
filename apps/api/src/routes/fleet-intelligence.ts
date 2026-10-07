@@ -4,6 +4,7 @@ import { pool } from "../lib/db";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
+import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -1771,6 +1772,7 @@ router.get("/alerts", async (req: AdminRequest, res) => {
       res.json({ alerts: [], unreadCount: 0 });
       return;
     }
+    await syncFleetAlertsForCompany(cid);
     const isRead = typeof req.query.isRead === "string" && req.query.isRead !== "all" ? req.query.isRead : "";
     const severity = typeof req.query.severity === "string" && req.query.severity !== "all" ? req.query.severity : "";
     const page = Math.max(Number(req.query.page) || 1, 1);
