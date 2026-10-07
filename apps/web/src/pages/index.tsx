@@ -397,8 +397,9 @@ export default function FleetIntelligenceDashboard() {
 
         {/* Outstanding KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="bg-amber-900/20 border-amber-700/40">
-            <CardContent className="p-5">
+          <Link href="/logistics/fleet-intelligence/outstanding?status=open">
+            <Card className="bg-amber-900/20 border-amber-700/40 cursor-pointer transition-all hover:-translate-y-0.5 hover:border-amber-500/60 hover:shadow-[0_16px_38px_rgba(245,158,11,.12)]">
+              <CardContent className="p-5">
               <div className="w-10 h-10 rounded-xl bg-amber-400/10 flex items-center justify-center mb-3">
                 <DollarSign className="w-5 h-5 text-amber-400" />
               </div>
@@ -408,12 +409,14 @@ export default function FleetIntelligenceDashboard() {
                 <div className="text-2xl font-bold text-amber-300">{fmtIdr(totalOutstanding)}</div>
               )}
               <div className="text-sm text-slate-400 mt-1">Total Outstanding Belum Lunas</div>
-              <div className="text-xs text-slate-500 mt-0.5">All-time · status open</div>
-            </CardContent>
-          </Card>
+              <div className="text-xs text-slate-500 mt-0.5">All-time · status open · Klik untuk detail</div>
+              </CardContent>
+            </Card>
+          </Link>
 
-          <Card className="bg-blue-900/20 border-blue-700/40">
-            <CardContent className="p-5">
+          <Link href="/logistics/fleet-intelligence/outstanding?status=open">
+            <Card className="bg-blue-900/20 border-blue-700/40 cursor-pointer transition-all hover:-translate-y-0.5 hover:border-blue-500/60 hover:shadow-[0_16px_38px_rgba(59,130,246,.12)]">
+              <CardContent className="p-5">
               <div className="w-10 h-10 rounded-xl bg-blue-400/10 flex items-center justify-center mb-3">
                 <Users className="w-5 h-5 text-blue-400" />
               </div>
@@ -423,12 +426,14 @@ export default function FleetIntelligenceDashboard() {
                 <div className="text-2xl font-bold text-blue-300">{fmtNum(allDriverCount)}</div>
               )}
               <div className="text-sm text-slate-400 mt-1">Jumlah Driver Belum Lunas</div>
-              <div className="text-xs text-slate-500 mt-0.5">Driver dengan saldo hutang aktif</div>
-            </CardContent>
-          </Card>
+              <div className="text-xs text-slate-500 mt-0.5">Driver dengan saldo hutang aktif · Klik untuk detail</div>
+              </CardContent>
+            </Card>
+          </Link>
 
-          <Card className="bg-red-900/20 border-red-700/40">
-            <CardContent className="p-5">
+          <Link href="/logistics/fleet-intelligence/outstanding?status=open&minOutstanding=1000000&sort=outstanding_desc">
+            <Card className="bg-red-900/20 border-red-700/40 cursor-pointer transition-all hover:-translate-y-0.5 hover:border-red-500/60 hover:shadow-[0_16px_38px_rgba(239,68,68,.14)]">
+              <CardContent className="p-5">
               <div className="w-10 h-10 rounded-xl bg-red-400/10 flex items-center justify-center mb-3">
                 <AlertTriangle className="w-5 h-5 text-red-400" />
               </div>
@@ -438,9 +443,10 @@ export default function FleetIntelligenceDashboard() {
                 <div className="text-2xl font-bold text-red-300">{fmtNum(highCount)}</div>
               )}
               <div className="text-sm text-slate-400 mt-1">Driver Outstanding Tinggi</div>
-              <div className="text-xs text-slate-500 mt-0.5">Outstanding ≥ Rp 1.000.000</div>
-            </CardContent>
-          </Card>
+              <div className="text-xs text-slate-500 mt-0.5">Outstanding ≥ Rp 1.000.000 · Klik untuk lihat driver</div>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
 
         {/* Outstanding Alert */}
