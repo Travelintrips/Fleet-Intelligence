@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { ExternalLink, Link2, ShieldCheck, Database, FileDown, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +22,10 @@ type ConnectorStatus = {
   automationPolicy: string;
 };
 
+const LOCAL_BRIDGE = "http://127.0.0.1:17891";
+
 export default function GojekConnectorPage() {
+  const [bridgeStatus, setBridgeStatus] = useState<"checking"|"online"|"offline">("checking");
   const { data, isLoading, refetch, isFetching } = useQuery<ConnectorStatus>({
     queryKey: ["fleet-gojek-connector-status"],
     queryFn: async () => {
@@ -32,10 +37,42 @@ export default function GojekConnectorPage() {
     staleTime: 30_000,
   });
 
-  const openPortal = () => {
-    if (!data?.portalUrl) return;
-    window.open(data.portalUrl, "_blank", "noopener,noreferrer");
-  };
+  async function checkBridge(showToast = false) {
+    setBridgeStatus("checking");
+    try {
+      const res = await fetch(`${LOCAL_BRIDGE}/health`, { method: "GET", cache: "no-store" });
+      if (!res.ok) throw new Error("Bridge tidak merespons");
+      setBridgeStatus("online");
+      if (showToast) toast.success("Bridge lokal terhubung.");
+      return true;
+    } catch {
+      setBridgeStatus("offline");
+      if (showToast) toast.error("Bridge lokal belum berjalan di PC ini.");
+      return false;
+    }
+  }
+
+  async function openPortal() {
+    const online = bridgeStatus === "online" || await checkBridge();
+    if (!online) {
+      toast.error("Jalankan Gojek Export Bridge terlebih dahulu. Jangan export dari Chrome biasa.");
+      return;
+    }
+    try {
+      const res = await fetch(`${LOCAL_BRIDGE}/open`, { method: "POST" });
+      if (!res.ok) throw new Error("Bridge gagal membuka portal");
+      toast.success("Fleet Partner dibuka melalui browser bridge.");
+    } catch (error) {
+      setBridgeStatus("offline");
+      toast.error(error instanceof Error ? error.message : "Bridge tidak dapat dihubungi.");
+    }
+  }
+
+  useEffect(() => {
+    void checkBridge();
+    const timer = window.setInterval(() => void checkBridge(), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <AppShell>
@@ -46,21 +83,22 @@ export default function GojekConnectorPage() {
             <p className="mt-1 text-sm text-slate-400">Jalur export resmi Gojek → server handoff → Fleet transaction pipeline</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="gap-2" disabled={isFetching} onClick={() => refetch()}>
+            <Button variant="outline" className="gap-2" disabled={isFetching} onClick={() => { refetch(); void checkBridge(true); }}>
               <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh
             </Button>
-            <Button className="gap-2" disabled={!data?.portalUrl} onClick={openPortal}>
+            <Button className="gap-2" disabled={!data?.portalUrl || bridgeStatus === "checking"} onClick={() => void openPortal()}>
               <ExternalLink className="h-4 w-4" /> Buka Fleet Partner Gojek
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
           {[
             ["Connector", data?.enabled ? "Aktif" : "Nonaktif", data?.enabled ? "text-emerald-300" : "text-slate-400"],
             ["Receiver", data?.ready ? "Siap" : "Belum Siap", data?.ready ? "text-emerald-300" : "text-amber-300"],
             ["Credential Gojek", "Tidak Disimpan", "text-emerald-300"],
             ["File Export", data?.fileRetention === "none" ? "Tidak Disimpan" : "Temporary", "text-emerald-300"],
+            ["Bridge Lokal", bridgeStatus === "online" ? "Terhubung" : bridgeStatus === "checking" ? "Memeriksa…" : "Tidak Aktif", bridgeStatus === "online" ? "text-emerald-300" : "text-amber-300"],
           ].map(([label,value,cls]) => (
             <Card key={label} className="border-white/[0.07] bg-slate-900/70">
               <CardContent className="p-4">
@@ -113,8 +151,8 @@ export default function GojekConnectorPage() {
           <CardContent className="flex gap-3 p-5">
             <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10"><FileDown className="h-4 w-4 text-indigo-300" /></div>
             <div>
-              <div className="font-semibold text-slate-100">Server handoff sudah disiapkan</div>
-              <p className="mt-1 text-sm text-slate-400">Tahap berikutnya adalah memasang runtime connector yang menerima hasil export resmi dari sesi Fleet Partner yang diotorisasi, lalu POST ke receiver ini. Receiver Fleet sendiri tidak membutuhkan credential Gojek.</p>
+              <div className="font-semibold text-slate-100">Export harus dilakukan melalui browser bridge</div>
+              <p className="mt-1 text-sm text-slate-400">Jika tombol Export Gojek ditekan dari Chrome biasa, file akan tetap masuk ke Downloads PC. Jalankan bridge lokal sampai status “Bridge Lokal: Terhubung”, lalu gunakan tombol “Buka Fleet Partner Gojek” di halaman ini. Download dari browser bridge akan langsung di-handoff ke CST Fleet.</p>
             </div>
           </CardContent>
         </Card>
