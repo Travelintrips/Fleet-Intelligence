@@ -1827,10 +1827,16 @@ router.get("/drivers", async (req: AdminRequest, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
     const offset = (page - 1) * limit;
     const statusSql = status === "inactive"
-      ? "d.status <> 'active'"
-      : "($3='' OR d.status=$3)";
+      ? "d.status <> 'active' AND COALESCE(d.applicator_status,'') NOT IN ('resign','fired','need_to_assign')"
+      : status === "need_to_assign"
+        ? "COALESCE(d.applicator_status,'')='need_to_assign'"
+        : status === "resign"
+          ? "COALESCE(d.applicator_status,'')='resign'"
+          : status === "suspended"
+            ? "(d.status='suspended' OR COALESCE(d.applicator_status,'')='fired')"
+            : "($3='' OR d.status=$3)";
 
-    const [rows, count] = await Promise.all([
+    const [rows, count, summary] = await Promise.all([
       pool.query(
         `SELECT d.*,
                 d.full_name AS name,
@@ -1846,7 +1852,17 @@ router.get("/drivers", async (req: AdminRequest, res) => {
           WHERE d.company_id=$1::text
             AND ($2='' OR d.full_name ILIKE '%' || $2 || '%' OR COALESCE(d.driver_external_id,'') ILIKE '%' || $2 || '%' OR COALESCE(d.vehicle_plate,'') ILIKE '%' || $2 || '%' OR COALESCE(d.phone,'') ILIKE '%' || $2 || '%')
             AND ${statusSql}
-          ORDER BY d.full_name ASC
+          ORDER BY
+            CASE
+              WHEN d.status='suspended' OR COALESCE(d.applicator_status,'')='fired' THEN 1
+              WHEN COALESCE(d.applicator_status,'')='need_to_assign' THEN 2
+              WHEN COALESCE(o.outstanding,0) > 0 THEN 3
+              WHEN d.status='inactive' THEN 4
+              WHEN COALESCE(d.applicator_status,'')='resign' THEN 5
+              ELSE 6
+            END,
+            COALESCE(o.outstanding,0) DESC,
+            d.full_name ASC
           LIMIT $4 OFFSET $5`,
         [cid, search, status, limit, offset],
       ),
@@ -1858,8 +1874,24 @@ router.get("/drivers", async (req: AdminRequest, res) => {
             AND ${statusSql}`,
         [cid, search, status],
       ),
+      pool.query(
+        `SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE d.status='active')::int AS active,
+            COUNT(*) FILTER (WHERE COALESCE(d.applicator_status,'')='need_to_assign')::int AS need_to_assign,
+            COUNT(*) FILTER (WHERE COALESCE(d.applicator_status,'')='resign')::int AS resign,
+            COUNT(*) FILTER (WHERE d.status='suspended' OR COALESCE(d.applicator_status,'')='fired')::int AS suspended,
+            COUNT(*) FILTER (
+              WHERE d.status <> 'active'
+                AND COALESCE(d.applicator_status,'') NOT IN ('resign','fired','need_to_assign')
+            )::int AS inactive
+           FROM public.fleet_drivers d
+          WHERE d.company_id=$1::text
+            AND ($2='' OR d.full_name ILIKE '%' || $2 || '%' OR COALESCE(d.driver_external_id,'') ILIKE '%' || $2 || '%' OR COALESCE(d.vehicle_plate,'') ILIKE '%' || $2 || '%' OR COALESCE(d.phone,'') ILIKE '%' || $2 || '%')`,
+        [cid, search],
+      ),
     ]);
-    res.json({ drivers: rows.rows, total: count.rows[0]?.count ?? 0 });
+    res.json({ drivers: rows.rows, total: count.rows[0]?.count ?? 0, summary: summary.rows[0] ?? {} });
   } catch (error) {
     req.log.error({ error }, "Fleet drivers failed");
     res.status(503).json({ error: "Gagal mengambil daftar driver." });
