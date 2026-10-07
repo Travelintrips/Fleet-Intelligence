@@ -39,10 +39,18 @@ const portalUrl = String(config.portalUrl || "https://fleetpartner.gojek.com");
 const controlPort = Number(config.controlPort || 17891);
 
 const seen = new Map();
+const pending = new Map();
+const startupCutoff = Date.now() - 10 * 60 * 1000;
 for (const name of fs.readdirSync(downloadDir)) {
   if (!name.toLowerCase().endsWith(".csv")) continue;
   const p = path.join(downloadDir,name);
-  try { seen.set(p, fs.statSync(p).mtimeMs); } catch {}
+  try {
+    const st = fs.statSync(p);
+    seen.set(p, st.mtimeMs);
+    if (st.mtimeMs >= startupCutoff) {
+      pending.set(p,{size:st.size,stable:0,busy:false,mtime:st.mtimeMs});
+    }
+  } catch {}
 }
 
 async function handoff(filePath) {
@@ -72,7 +80,6 @@ async function handoff(filePath) {
   throw new Error(msg);
 }
 
-const pending = new Map();
 setInterval(() => {
   let names=[];
   try { names=fs.readdirSync(downloadDir); } catch { return; }
@@ -81,11 +88,24 @@ setInterval(() => {
     const p=path.join(downloadDir,name);
     let st; try { st=fs.statSync(p); } catch { continue; }
     const prior=seen.get(p);
-    if (prior !== undefined && prior === st.mtimeMs) continue;
-    seen.set(p,st.mtimeMs);
-    const cur=pending.get(p) || {size:-1,stable:0,busy:false};
+    const cur=pending.get(p) || {size:-1,stable:0,busy:false,mtime:0};
     if (cur.busy) continue;
-    if (cur.size===st.size) cur.stable+=1; else {cur.size=st.size;cur.stable=0;}
+
+    // New/changed CSV enters the pending queue. Subsequent polls must keep
+    // checking its size even when mtime is unchanged so we can confirm the
+    // browser has finished writing it.
+    if (prior === undefined || prior !== st.mtimeMs) {
+      seen.set(p,st.mtimeMs);
+      cur.mtime=st.mtimeMs;
+      cur.size=st.size;
+      cur.stable=0;
+      pending.set(p,cur);
+      continue;
+    }
+
+    if (!pending.has(p)) continue;
+    if (cur.size===st.size) cur.stable+=1;
+    else { cur.size=st.size; cur.stable=0; }
     pending.set(p,cur);
     if (cur.stable < 2) continue;
     cur.busy=true;
