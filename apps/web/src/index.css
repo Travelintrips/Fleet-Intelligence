@@ -1,4 +1,166 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --fleet-surface: rgba(15, 23, 42, 0.72);
+  --fleet-surface-strong: rgba(15, 23, 42, 0.92);
+  --fleet-border: rgba(148, 163, 184, 0.14);
+  --fleet-border-strong: rgba(129, 140, 248, 0.24);
+  --fleet-shadow: 0 22px 70px rgba(2, 6, 23, 0.34);
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; background: #050816; }
 html, body, #root { min-height: 100%; }
-body { margin: 0; background: #020617; color: #e2e8f0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+
+body {
+  margin: 0;
+  color: #e2e8f0;
+  font-family: Inter, "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 12% 4%, rgba(79, 70, 229, 0.16), transparent 28rem),
+    radial-gradient(circle at 88% 14%, rgba(14, 165, 233, 0.12), transparent 28rem),
+    linear-gradient(180deg, #070b17 0%, #050816 48%, #030611 100%);
+  background-attachment: fixed;
+}
+
+::selection { background: rgba(99, 102, 241, 0.35); color: white; }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, .65) rgba(15, 23, 42, .35);
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: rgba(15, 23, 42, .3); }
+*::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, .6);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.fleet-page {
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.fleet-page h1 {
+  letter-spacing: -0.035em;
+  font-weight: 750;
+}
+
+.fleet-page h2,
+.fleet-page h3,
+.fleet-page [data-slot="card-title"] {
+  letter-spacing: -0.02em;
+}
+
+.fleet-page > div {
+  animation: fleet-enter .3s ease-out both;
+}
+
+@keyframes fleet-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fleet-page [class*="bg-slate-800\/60"],
+.fleet-page [class*="bg-slate-800\/50"],
+.fleet-page [class*="bg-slate-900\/"] {
+  background: linear-gradient(180deg, rgba(20, 30, 51, .82), rgba(11, 18, 32, .78)) !important;
+  border-color: var(--fleet-border) !important;
+  box-shadow: 0 14px 36px rgba(2, 6, 23, .18);
+  backdrop-filter: blur(18px);
+}
+
+.fleet-page [class*="rounded-xl"][class*="border"],
+.fleet-page [class*="rounded-lg"][class*="border"] {
+  border-color: var(--fleet-border);
+}
+
+.fleet-page table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.fleet-page thead {
+  background: rgba(15, 23, 42, .52);
+}
+
+.fleet-page th {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .075em;
+  color: #94a3b8;
+}
+
+.fleet-page tbody tr {
+  transition: background-color .18s ease, transform .18s ease;
+}
+
+.fleet-page tbody tr:hover {
+  background-color: rgba(51, 65, 85, .22);
+}
+
+.fleet-page input,
+.fleet-page textarea,
+.fleet-page select,
+.fleet-page button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fleet-page input:focus,
+.fleet-page textarea:focus,
+.fleet-page select:focus {
+  border-color: rgba(129, 140, 248, .7) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+}
+
+.fleet-page button {
+  transition:
+    transform .16s ease,
+    background-color .16s ease,
+    border-color .16s ease,
+    color .16s ease,
+    box-shadow .16s ease;
+}
+
+.fleet-page button:not(:disabled):active {
+  transform: translateY(1px) scale(.99);
+}
+
+.fleet-page [class*="shadow"] {
+  box-shadow: 0 14px 34px rgba(2, 6, 23, .2);
+}
+
+.fleet-page [class*="text-slate-400"] {
+  color: #9aa9bd;
+}
+
+.fleet-page [class*="border-slate-700"] {
+  border-color: rgba(100, 116, 139, .22);
+}
+
+.fleet-page .recharts-cartesian-grid line {
+  stroke: rgba(100, 116, 139, .22);
+}
+
+.fleet-page .recharts-tooltip-wrapper {
+  filter: drop-shadow(0 18px 30px rgba(2, 6, 23, .38));
+}
+
+.fleet-premium-card {
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, .8), rgba(15, 23, 42, .72));
+  border: 1px solid var(--fleet-border);
+  box-shadow: var(--fleet-shadow);
+  backdrop-filter: blur(20px);
+}
+
+@media (max-width: 768px) {
+  .fleet-page { padding-bottom: 1rem; }
+  .fleet-page h1 { font-size: 1.65rem; }
+}
