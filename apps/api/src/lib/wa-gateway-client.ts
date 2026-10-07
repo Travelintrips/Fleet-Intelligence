@@ -20,6 +20,22 @@ type FleetGatewayDevice = {
   lastHeartbeatAt: string | null;
 };
 
+type FleetDeviceSelection = {
+  deviceId: string | null;
+  status: string;
+  selection: "explicit" | "single_online" | "single_assigned" | "unresolved";
+};
+
+type CachedDeviceSelection = {
+  expiresAt: number;
+  key: string;
+  selection: FleetDeviceSelection;
+  devices: FleetGatewayDevice[];
+};
+
+let deviceSelectionCache: CachedDeviceSelection | null = null;
+const DEVICE_CACHE_MS = 30_000;
+
 function gatewayConfig() {
   return {
     baseUrl: String(process.env.CST_WA_GATEWAY_URL ?? process.env.WA_GATEWAY_URL ?? "").trim().replace(/\/$/, ""),
@@ -35,7 +51,7 @@ async function listFleetGatewayDevices(baseUrl: string, token: string): Promise<
 }> {
   const response = await fetch(`${baseUrl}/v1/devices`, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) {
     return { ok: false, statusCode: response.status, devices: [] };
@@ -55,19 +71,19 @@ async function listFleetGatewayDevices(baseUrl: string, token: string): Promise<
   return { ok: true, statusCode: response.status, devices };
 }
 
-function selectFleetDevice(devices: FleetGatewayDevice[], configuredDeviceId: string | null) {
+function selectFleetDevice(devices: FleetGatewayDevice[], configuredDeviceId: string | null): FleetDeviceSelection {
   if (configuredDeviceId) {
     const selected = devices.find((device) => device.deviceId === configuredDeviceId);
     return {
       deviceId: configuredDeviceId,
       status: selected ? selected.enabled ? selected.status : "DISABLED" : "NOT_ASSIGNED",
-      selection: "explicit" as const,
+      selection: "explicit",
     };
   }
 
   const online = devices.filter((device) => device.enabled && device.status === "ONLINE");
   if (online.length === 1) {
-    return { deviceId: online[0].deviceId, status: "ONLINE", selection: "single_online" as const };
+    return { deviceId: online[0].deviceId, status: "ONLINE", selection: "single_online" };
   }
 
   const enabled = devices.filter((device) => device.enabled);
@@ -75,15 +91,41 @@ function selectFleetDevice(devices: FleetGatewayDevice[], configuredDeviceId: st
     return {
       deviceId: enabled[0].deviceId,
       status: enabled[0].status,
-      selection: "single_assigned" as const,
+      selection: "single_assigned",
     };
   }
 
   return {
     deviceId: null,
     status: online.length > 1 ? "AMBIGUOUS_ONLINE_DEVICES" : enabled.length > 1 ? "AMBIGUOUS_ASSIGNED_DEVICES" : "NO_ASSIGNED_DEVICE",
-    selection: "unresolved" as const,
+    selection: "unresolved",
   };
+}
+
+async function resolveFleetDevice(baseUrl: string, token: string, configuredDeviceId: string | null, force = false) {
+  const key = `${baseUrl}|${configuredDeviceId ?? ""}|${token.slice(0, 12)}`;
+  if (!force && deviceSelectionCache && deviceSelectionCache.key === key && deviceSelectionCache.expiresAt > Date.now()) {
+    return {
+      ok: true,
+      statusCode: 200,
+      devices: deviceSelectionCache.devices,
+      selection: deviceSelectionCache.selection,
+      cached: true,
+    };
+  }
+
+  const registry = await listFleetGatewayDevices(baseUrl, token);
+  if (!registry.ok) {
+    return { ...registry, selection: null, cached: false };
+  }
+  const selection = selectFleetDevice(registry.devices, configuredDeviceId);
+  deviceSelectionCache = {
+    key,
+    expiresAt: Date.now() + DEVICE_CACHE_MS,
+    selection,
+    devices: registry.devices,
+  };
+  return { ...registry, selection, cached: false };
 }
 
 export async function sendFleetWa(args: { phone: string; message: string; idempotencyKey?: string }) {
@@ -93,15 +135,15 @@ export async function sendFleetWa(args: { phone: string; message: string; idempo
   const phone = normalizeFleetPhone(args.phone);
   if (!phone) throw new Error("Nomor WhatsApp Fleet tidak valid.");
 
-  const registry = await listFleetGatewayDevices(baseUrl, token);
-  if (!registry.ok) {
-    if (registry.statusCode === 401 || registry.statusCode === 403) {
+  const resolved = await resolveFleetDevice(baseUrl, token, cfg.configuredDeviceId);
+  if (!resolved.ok || !resolved.selection) {
+    if (resolved.statusCode === 401 || resolved.statusCode === 403) {
       throw new Error("Token WA Gateway Fleet tidak memiliki akses device.");
     }
-    throw new Error(`WA Gateway device registry HTTP ${registry.statusCode}`);
+    throw new Error(`WA Gateway device registry HTTP ${resolved.statusCode}`);
   }
 
-  const selection = selectFleetDevice(registry.devices, cfg.configuredDeviceId);
+  const selection = resolved.selection;
   if (!selection.deviceId) {
     throw new Error(`Device WA Fleet belum dapat ditentukan: ${selection.status}`);
   }
@@ -125,7 +167,12 @@ export async function sendFleetWa(args: { phone: string; message: string; idempo
     signal: AbortSignal.timeout(15_000),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) throw new Error(String(payload.error ?? payload.message ?? `WA Gateway HTTP ${response.status}`));
+  if (!response.ok) {
+    if (response.status === 409 || response.status === 422 || response.status === 503) {
+      deviceSelectionCache = null;
+    }
+    throw new Error(String(payload.error ?? payload.message ?? `WA Gateway HTTP ${response.status}`));
+  }
   return {
     messageId: String(payload.messageId ?? payload.id ?? payload.requestId ?? "") || null,
     senderDevice: selection.deviceId,
@@ -147,47 +194,46 @@ export async function getFleetWaGatewayStatus() {
     };
   }
 
-  let gatewayHealthy = false;
-  let gatewayStatus = "UNKNOWN";
-  try {
-    const health = await fetch(`${cfg.baseUrl}/health`, { signal: AbortSignal.timeout(8_000) });
-    if (health.ok) {
-      const payload = await health.json().catch(() => null) as Record<string, unknown> | null;
-      gatewayHealthy = String(payload?.status ?? "").toLowerCase() === "ok";
-      gatewayStatus = gatewayHealthy ? "OK" : String(payload?.status ?? "UNKNOWN").toUpperCase();
-    } else {
-      gatewayStatus = `HTTP_${health.status}`;
-    }
-  } catch {
-    gatewayStatus = "UNREACHABLE";
-  }
+  const healthPromise = fetch(`${cfg.baseUrl}/health`, {
+    signal: AbortSignal.timeout(5_000),
+  }).then(async (response) => {
+    if (!response.ok) return { healthy: false, status: `HTTP_${response.status}` };
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const healthy = String(payload?.status ?? "").toLowerCase() === "ok";
+    return { healthy, status: healthy ? "OK" : String(payload?.status ?? "UNKNOWN").toUpperCase() };
+  }).catch(() => ({ healthy: false, status: "UNREACHABLE" }));
+
+  const registryPromise = resolveFleetDevice(
+    cfg.baseUrl,
+    cfg.token,
+    cfg.configuredDeviceId,
+    true,
+  ).catch(() => null);
+
+  const [health, registry] = await Promise.all([healthPromise, registryPromise]);
 
   let visibleDevices: FleetGatewayDevice[] = [];
   let deviceId: string | null = cfg.configuredDeviceId;
   let deviceStatus: string | null = null;
   let deviceSelection = "unresolved";
 
-  try {
-    const registry = await listFleetGatewayDevices(cfg.baseUrl, cfg.token);
-    if (registry.ok) {
-      visibleDevices = registry.devices;
-      const selected = selectFleetDevice(visibleDevices, cfg.configuredDeviceId);
-      deviceId = selected.deviceId;
-      deviceStatus = selected.status;
-      deviceSelection = selected.selection;
-    } else if (registry.statusCode === 401 || registry.statusCode === 403) {
-      deviceStatus = "TOKEN_FORBIDDEN";
-    } else {
-      deviceStatus = `HTTP_${registry.statusCode}`;
-    }
-  } catch {
+  if (registry?.ok && registry.selection) {
+    visibleDevices = registry.devices;
+    deviceId = registry.selection.deviceId;
+    deviceStatus = registry.selection.status;
+    deviceSelection = registry.selection.selection;
+  } else if (registry) {
+    deviceStatus = registry.statusCode === 401 || registry.statusCode === 403
+      ? "TOKEN_FORBIDDEN"
+      : `HTTP_${registry.statusCode}`;
+  } else {
     deviceStatus = "UNREACHABLE";
   }
 
   return {
     configured: Boolean(cfg.baseUrl && cfg.token && deviceId),
-    gatewayHealthy,
-    gatewayStatus,
+    gatewayHealthy: health.healthy,
+    gatewayStatus: health.status,
     deviceId,
     deviceStatus,
     deviceSelection,
