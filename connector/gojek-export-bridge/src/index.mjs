@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
 
 function required(name) {
   const value = String(process.env[name] ?? "").trim();
@@ -19,6 +20,7 @@ if (parsedPortal.protocol !== "https:" || parsedPortal.hostname !== allowedHost)
 const fleetBaseUrl = required("FLEET_BASE_URL").replace(/\/$/, "");
 const sharedSecret = required("GOJEK_CONNECTOR_SHARED_SECRET");
 const maxFileMb = Math.min(Math.max(Number(process.env.GOJEK_CONNECTOR_MAX_FILE_MB ?? 10) || 10, 1), 12);
+const controlPort = Math.min(Math.max(Number(process.env.GOJEK_BRIDGE_CONTROL_PORT ?? 17891) || 17891, 1024), 65535);
 const tempDir = await mkdtemp(path.join(os.tmpdir(), "cst-gojek-export-"));
 
 console.log("CST Gojek Export Bridge");
@@ -37,7 +39,16 @@ const context = await browser.newContext({
   acceptDownloads: true,
 });
 
-const page = await context.newPage();
+let page = await context.newPage();
+
+async function ensurePortalOpen() {
+  if (page.isClosed()) page = await context.newPage();
+  await page.bringToFront();
+  const current = page.url();
+  if (!current || current === "about:blank" || !current.startsWith("https://fleetpartner.gojek.com")) {
+    await page.goto(portalUrl, { waitUntil: "domcontentloaded" });
+  }
+}
 
 async function handoffDownload(download) {
   const suggested = download.suggestedFilename() || "gojek-export.csv";
@@ -90,13 +101,60 @@ async function handoffDownload(download) {
   }
 }
 
+context.on("page", (p) => {
+  p.on("download", (download) => {
+    void handoffDownload(download).catch((error) => {
+      console.error("Handoff export gagal:", error instanceof Error ? error.message : error);
+    });
+  });
+});
+
 page.on("download", (download) => {
   void handoffDownload(download).catch((error) => {
     console.error("Handoff export gagal:", error instanceof Error ? error.message : error);
   });
 });
 
-await page.goto(portalUrl, { waitUntil: "domcontentloaded" });
+const controlServer = http.createServer((req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://fleet.cstlogistic.co.id");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store");
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, bridge: "cst-gojek-export-bridge", portalHost: allowedHost }));
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/open") {
+    void ensurePortalOpen()
+      .then(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch((error) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Gagal membuka portal." }));
+      });
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Not found" }));
+});
+
+controlServer.listen(controlPort, "127.0.0.1", () => {
+  console.log(`Local bridge control: http://127.0.0.1:${controlPort}`);
+});
+
+await ensurePortalOpen();
 
 console.log("");
 console.log("Browser sudah dibuka.");
@@ -108,6 +166,7 @@ console.log("");
 console.log("Tekan Ctrl+C untuk berhenti.");
 
 const shutdown = async () => {
+  await new Promise((resolve) => controlServer.close(() => resolve())).catch(() => undefined);
   await context.close().catch(() => undefined);
   await browser.close().catch(() => undefined);
   await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
