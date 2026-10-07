@@ -104,8 +104,34 @@ fs.copyFileSync(path.join(target,"start-hidden.vbs"),startup);
 
 spawn("wscript.exe",[path.join(target,"start-hidden.vbs")],{detached:true,windowsHide:true,stdio:"ignore"}).unref();
 
+async function sleep(ms){ return new Promise((resolve)=>setTimeout(resolve,ms)); }
+
+let health=null;
+for(let i=0;i<20;i++){
+  try{
+    const res=await fetch("http://127.0.0.1:17891/health",{cache:"no-store"});
+    if(res.ok){ health=await res.json(); break; }
+  }catch{}
+  await sleep(500);
+}
+if(!health?.ok) throw new Error("Watcher tidak berhasil hidup di port 17891.");
+
+const self=await fetch("http://127.0.0.1:17891/self-test",{method:"POST"});
+const result=await self.json().catch(()=>({}));
+if(!self.ok || !result.ok){
+  throw new Error("SELF-TEST GAGAL: " + String(result.error || self.status));
+}
+
 console.log("");
-console.log("CST Fleet Watcher v3 berhasil dipasang.");
-console.log("Watcher akan otomatis hidup setiap Windows login.");
-console.log("Sekarang buka CST Fleet > Gojek Connector > Refresh.");
-console.log("Status lokal harus menjadi Terhubung.");
+console.log("==============================================");
+console.log(" CST FLEET WATCHER FINAL - SELF TEST LULUS");
+console.log("==============================================");
+console.log("Watcher Version : " + result.watcherVersion);
+console.log("Folder Downloads: " + result.downloadDir);
+console.log("Write Folder     : " + (result.downloadWritable ? "OK" : "FAIL"));
+console.log("Auth Server      : " + (result.serverAuthenticated ? "OK" : "FAIL"));
+console.log("Database         : " + String(result.database || "unknown"));
+console.log("Parser           : " + String(result.parserType || "unknown") + " (" + String(result.parserRows || 0) + " row)");
+console.log("Dry Run Persist  : " + String(result.persisted));
+console.log("");
+console.log("STATUS: SIAP DIGUNAKAN");
