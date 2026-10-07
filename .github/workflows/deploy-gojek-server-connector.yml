@@ -28,17 +28,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate secrets
+      - name: Preflight deployment inputs
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
+          : > /tmp/gojek-preflight.txt
+          missing=0
           for name in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY GOJEK_CONNECTOR_SHARED_SECRET; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required secret: $name"
-              exit 1
+            if [ -n "${!name:-}" ]; then
+              echo "$name=present" >> /tmp/gojek-preflight.txt
+            else
+              echo "$name=missing" >> /tmp/gojek-preflight.txt
+              echo "::error::Missing required deployment input: $name"
+              missing=1
             fi
           done
-          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          if [[ "${SSH_PORT:-}" =~ ^[0-9]+$ ]]; then
+            echo "SSH_PORT_FORMAT=valid" >> /tmp/gojek-preflight.txt
+          else
+            echo "SSH_PORT_FORMAT=invalid" >> /tmp/gojek-preflight.txt
+            missing=1
+          fi
+          exit $missing
+
+      - name: Upload preflight diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gojek-preflight-diagnostic
+          path: /tmp/gojek-preflight.txt
+          if-no-files-found: error
 
       - name: Configure and diagnose SSH
         shell: bash
