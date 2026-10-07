@@ -50,6 +50,9 @@ type SystemOverview = {
   alerts: { criticalUnread: number; otherUnread: number; totalUnread: number };
   transactions: { total: number; todayCount: number; totalGross: number; latestDate: string | null };
   drivers: { total: number; active: number; suspended: number };
+  wa: { configured: boolean; gatewayHealthy: boolean; gatewayStatus: string; deviceId: string | null; deviceStatus: string | null; ready: boolean };
+  reminder: { enabled: boolean; hourWib: number; lastRun: string | null; lastTick: string | null; lastAttempt: string | null; lastSuccess: string | null; senderDevice: string | null; deviceStatus: string | null; lastError: string | null };
+  dataSource: { reports: number; rawRows: number; normalizedRows: number; state: "normalized" | "raw_only" | "no_source_data" };
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -400,6 +403,62 @@ export default function FleetControlCenterPage() {
                             {reconcileMutation.isPending ? "Proses..." : "Rekonsiliasi Sekarang"}
                           </Button>
                         )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Card className="bg-slate-900 border-slate-700">
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                            <Activity className="h-3.5 w-3.5" /> WhatsApp
+                          </div>
+                          <span className={`text-xs font-semibold ${overview.wa.ready ? "text-emerald-400" : "text-red-400"}`}>
+                            {overview.wa.ready ? "READY" : "NOT READY"}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-200">{overview.wa.deviceId ?? "Device belum dipilih"}</div>
+                        <div className="text-xs text-slate-500">
+                          Gateway: {overview.wa.gatewayStatus} · Device: {overview.wa.deviceStatus ?? "UNKNOWN"}
+                        </div>
+                        <Link href="/logistics/fleet-intelligence/whatsapp">
+                          <Button size="sm" variant="outline" className="w-full mt-1 border-slate-700 text-xs">Buka WhatsApp</Button>
+                        </Link>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-slate-900 border-slate-700">
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                            <Zap className="h-3.5 w-3.5" /> Auto Reminder
+                          </div>
+                          <span className={`text-xs font-semibold ${overview.reminder.enabled ? "text-emerald-400" : "text-slate-500"}`}>
+                            {overview.reminder.enabled ? "AKTIF" : "NONAKTIF"}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-200">Target {String(overview.reminder.hourWib).padStart(2,"0")}:00 WIB</div>
+                        <div className="text-xs text-slate-500">Last success: {fmtTs(overview.reminder.lastSuccess)}</div>
+                        {overview.reminder.lastError && <div className="text-xs text-red-400 break-words">{overview.reminder.lastError}</div>}
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-slate-900 border-slate-700">
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                            <Database className="h-3.5 w-3.5" /> Data Source
+                          </div>
+                          <span className={`text-xs font-semibold ${overview.dataSource.state === "normalized" ? "text-emerald-400" : overview.dataSource.state === "raw_only" ? "text-amber-400" : "text-slate-500"}`}>
+                            {overview.dataSource.state === "normalized" ? "NORMALIZED" : overview.dataSource.state === "raw_only" ? "RAW ONLY" : "NO DATA"}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400">Report: {fmtNum(overview.dataSource.reports)}</div>
+                        <div className="text-xs text-slate-400">Raw: {fmtNum(overview.dataSource.rawRows)} · TX: {fmtNum(overview.dataSource.normalizedRows)}</div>
+                        <Link href="/logistics/fleet-intelligence/transactions">
+                          <Button size="sm" variant="outline" className="w-full mt-1 border-slate-700 text-xs">Lihat Transactions</Button>
+                        </Link>
                       </CardContent>
                     </Card>
                   </div>
