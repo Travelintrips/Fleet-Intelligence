@@ -21,7 +21,7 @@ import {
 const router = Router();
 
 function getGojekServerConnectorHealth() {
-  return Promise.resolve(getNativeGojekConnectorHealth());
+  return getNativeGojekConnectorHealth();
 }
 
 function connectorSecretMatches(value: unknown): boolean {
@@ -1271,7 +1271,7 @@ router.get("/gojek-connector/server-status", async (req: AdminRequest, res) => {
 router.post("/gojek-connector/server-sync/drivers", async (req: AdminRequest, res) => {
   try {
     companyId(req);
-    const health = getNativeGojekConnectorHealth();
+    const health = await getNativeGojekConnectorHealth();
     if (!health.configured) {
       res.status(409).json({ error: health.error ?? "Server connector belum dikonfigurasi." });
       return;

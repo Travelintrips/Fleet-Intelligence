@@ -27,6 +27,11 @@ type ConnectorStatus = {
     busy: boolean;
     lastRun?: Record<string, unknown> | null;
     service?: string | null;
+    browserReady?: boolean;
+    runtime?: string | null;
+    executablePath?: string | null;
+    browsersPath?: string | null;
+    error?: string | null;
   };
 };
 
@@ -145,6 +150,21 @@ export default function GojekConnectorPage() {
               </CardContent>
             </Card>
           ))}
+        {data?.serverConnector && !data.serverConnector.healthy ? (
+          <Card className="border-amber-400/20 bg-amber-500/[0.05]">
+            <CardContent className="p-4 text-sm">
+              <div className="font-semibold text-amber-200">Server Connector belum siap</div>
+              <div className="mt-2 space-y-1 text-xs text-slate-400">
+                <div>Runtime: <span className="font-mono text-slate-300">{data.serverConnector.runtime ?? "unknown"}</span></div>
+                <div>Browser: <span className={data.serverConnector.browserReady ? "text-emerald-300" : "text-amber-300"}>{data.serverConnector.browserReady ? "Ready" : "Not ready"}</span></div>
+                {data.serverConnector.browsersPath ? <div>PLAYWRIGHT_BROWSERS_PATH: <span className="font-mono text-slate-300">{data.serverConnector.browsersPath}</span></div> : null}
+                {data.serverConnector.executablePath ? <div className="break-all">Chromium: <span className="font-mono text-slate-300">{data.serverConnector.executablePath}</span></div> : null}
+                {data.serverConnector.error ? <div className="pt-1 text-amber-200">{data.serverConnector.error}</div> : null}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
