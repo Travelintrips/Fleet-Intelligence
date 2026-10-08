@@ -53,20 +53,47 @@ export default function GojekConnectorPage() {
 
   const syncDrivers = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/logistics/fleet/gojek-connector/server-sync/drivers", {
+      const start = await fetch("/api/logistics/fleet/gojek-connector/server-sync/drivers", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? "Sync Drivers Gojek gagal");
-      return json;
+      const started = await start.json().catch(() => ({}));
+      let jobId = String(started.jobId ?? "").trim();
+
+      if (!start.ok && !(start.status === 409 && jobId)) {
+        throw new Error(started.error ?? "Sync Drivers Gojek gagal");
+      }
+      if (!jobId) throw new Error("Job Sync Gojek tidak terbentuk.");
+
+      const deadline = Date.now() + 180_000;
+      while (Date.now() < deadline) {
+        const res = await fetch(
+          `/api/logistics/fleet/gojek-connector/server-sync/jobs/${encodeURIComponent(jobId)}`,
+          { credentials: "include", cache: "no-store" },
+        );
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.error ?? "Gagal membaca status Sync Gojek");
+
+        const status = String(payload.job?.status ?? "");
+        if (status === "succeeded") return payload.job;
+        if (status === "failed" || status === "cancelled") {
+          throw new Error(payload.job?.error ?? `Sync Gojek ${status}.`);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      throw new Error("Sync Gojek belum selesai dalam 3 menit. Cek kembali status connector.");
     },
     onSuccess: () => {
-      toast.success("Sync Drivers/Outstanding Gojek berhasil.");
+      toast.success("Sync Drivers/Outstanding Gojek berhasil dan data sudah diperbarui.");
       void refetch();
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      toast.error(error.message, { duration: 10000 });
+      void refetch();
+    },
   });
 
   async function checkBridge(showToast = false) {
