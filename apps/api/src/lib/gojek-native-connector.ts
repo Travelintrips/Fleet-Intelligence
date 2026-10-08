@@ -126,7 +126,7 @@ export function getNativeGojekConnectorHealth() {
     const executable = chromium.executablePath();
     browserReady = Boolean(executable && existsSync(executable));
     if (!browserReady) {
-      error = "Chromium runtime belum terpasang pada Hostinger.";
+      error = `Chromium runtime belum terpasang pada Hostinger. Expected: ${executable}`;
     }
   } catch (e) {
     configured = false;
