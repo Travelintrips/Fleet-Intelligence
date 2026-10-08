@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 
 type LastRun = {
@@ -117,9 +118,16 @@ async function loginIfNeeded(page: any) {
 
 export function getNativeGojekConnectorHealth() {
   let configured = true;
+  let browserReady = false;
   let error: string | null = null;
+
   try {
     getConfig();
+    const executable = chromium.executablePath();
+    browserReady = Boolean(executable && existsSync(executable));
+    if (!browserReady) {
+      error = "Chromium runtime belum terpasang pada Hostinger.";
+    }
   } catch (e) {
     configured = false;
     error = e instanceof Error ? e.message : String(e);
@@ -127,7 +135,8 @@ export function getNativeGojekConnectorHealth() {
 
   return {
     configured,
-    healthy: configured,
+    healthy: configured && browserReady,
+    browserReady,
     busy: running,
     lastRun,
     service: "cst-gojek-native-connector",
