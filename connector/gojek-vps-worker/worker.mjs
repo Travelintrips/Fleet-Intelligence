@@ -57,15 +57,17 @@ async function loginIfNeeded(page, credentials) {
 
   if ((await email.isVisible().catch(() => false)) || (await password.isVisible().catch(() => false))) {
     const submit = page.locator(
-      'button[type="submit"], input[type="submit"], button:has-text("Login"), button:has-text("Masuk"), button:has-text("Sign in")'
+      'button[type="submit"], input[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Masuk"), button:has-text("Sign in")'
     ).first();
     if (!(await submit.isVisible().catch(() => false))) {
       throw new Error("Form login ditemukan tetapi tombol login tidak dikenali.");
     }
-    await Promise.all([
-      page.waitForLoadState("domcontentloaded").catch(() => undefined),
-      submit.click(),
-    ]);
+    await submit.click();
+    // Login may navigate asynchronously (SPA/SSO); do not continue to export
+    // while the portal is still displaying the login form.
+    await page.waitForURL(url => !/\\/login(?:[/?#]|$)/i.test(url.pathname), {
+      timeout: 20_000,
+    }).catch(() => undefined);
   }
 
   const bodyText = await page.locator("body").innerText().catch(() => "");
@@ -95,7 +97,14 @@ async function syncJob(payload) {
       });
     }
 
-    await page.waitForLoadState("networkidle").catch(() => undefined);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
+
+    const loginFormVisible = await page.locator(
+      'input[type="password"], input[autocomplete="current-password"], button:has-text("Log in")'
+    ).first().isVisible().catch(() => false);
+    if (/\\/login(?:[/?#]|$)/i.test(new URL(page.url()).pathname) || loginFormVisible) {
+      throw new Error("Login Fleet Partner Gojek belum berhasil. Periksa kredensial atau selesaikan verifikasi resmi Gojek sebelum Sync Drivers.");
+    }
 
     const exportButton = page.locator(
       'button:has-text("Export"), a:has-text("Export"), [role="button"]:has-text("Export")'
