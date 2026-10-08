@@ -17,8 +17,39 @@ import {
 
 const router = Router();
 
-function getGojekServerConnectorHealth() {
-  return getNativeGojekConnectorHealth();
+async function getGojekServerConnectorHealth() {
+  const worker = await pool.query<{
+    worker_id: string;
+    heartbeat_at: string;
+    version: string | null;
+    last_job_id: string | null;
+    last_status: string | null;
+    last_error: string | null;
+  }>(
+    `SELECT worker_id,heartbeat_at,version,last_job_id,last_status,last_error
+       FROM public.fleet_gojek_connector_workers
+      ORDER BY heartbeat_at DESC
+      LIMIT 1`,
+  );
+  const row = worker.rows[0] ?? null;
+  const heartbeatAt = row?.heartbeat_at ? new Date(row.heartbeat_at).getTime() : 0;
+  const healthy = Boolean(row && Date.now() - heartbeatAt <= 30_000);
+  return {
+    configured: true,
+    healthy,
+    busy: row?.last_status === "running",
+    lastRun: row ? {
+      workerId: row.worker_id,
+      heartbeatAt: row.heartbeat_at,
+      version: row.version,
+      lastJobId: row.last_job_id,
+      lastStatus: row.last_status,
+      lastError: row.last_error,
+    } : null,
+    service: "cst-gojek-vps-worker",
+    runtime: "vps-docker",
+    error: healthy ? null : (row?.last_error ?? "VPS worker belum heartbeat."),
+  };
 }
 
 function connectorSecretMatches(value: unknown): boolean {
