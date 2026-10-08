@@ -7,6 +7,10 @@ import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
 import {
+  getNativeGojekConnectorHealth,
+  syncNativeGojekDrivers,
+} from "../lib/gojek-native-connector";
+import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
   postFleetCashPayment,
@@ -16,41 +20,8 @@ import {
 
 const router = Router();
 
-function getGojekServerConnectorConfig() {
-  const url = String(
-    process.env.GOJEK_SERVER_CONNECTOR_URL ??
-    "http://72.61.210.205:18082"
-  ).trim().replace(/\/$/, "");
-  const token = String(
-    process.env.GOJEK_SERVER_CONNECTOR_TOKEN ??
-    process.env.GOJEK_CONNECTOR_SHARED_SECRET ??
-    ""
-  ).trim();
-  return { url, token, configured: Boolean(url && token) };
-}
-
-async function getGojekServerConnectorHealth() {
-  const cfg = getGojekServerConnectorConfig();
-  if (!cfg.configured) {
-    return { configured: false, healthy: false, busy: false, lastRun: null };
-  }
-  try {
-    const response = await fetch(`${cfg.url}/health`, {
-      method: "GET",
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    });
-    const payload = await response.json().catch(() => ({}));
-    return {
-      configured: true,
-      healthy: response.ok && payload.ok === true,
-      busy: Boolean(payload.busy),
-      lastRun: payload.lastRun ?? null,
-      service: payload.service ?? null,
-    };
-  } catch {
-    return { configured: true, healthy: false, busy: false, lastRun: null };
-  }
+function getGojekServerConnectorHealth() {
+  return Promise.resolve(getNativeGojekConnectorHealth());
 }
 
 function connectorSecretMatches(value: unknown): boolean {
@@ -1300,33 +1271,18 @@ router.get("/gojek-connector/server-status", async (req: AdminRequest, res) => {
 router.post("/gojek-connector/server-sync/drivers", async (req: AdminRequest, res) => {
   try {
     companyId(req);
-    const cfg = getGojekServerConnectorConfig();
-    if (!cfg.configured) {
-      res.status(409).json({ error: "Server connector belum dikonfigurasi." });
+    const health = getNativeGojekConnectorHealth();
+    if (!health.configured) {
+      res.status(409).json({ error: health.error ?? "Server connector belum dikonfigurasi." });
       return;
     }
 
-    const response = await fetch(`${cfg.url}/sync/drivers`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ requestedBy: req.adminUser?.email ?? "unknown" }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      res.status(response.status === 409 ? 409 : 502).json({
-        error: payload.error ?? `Server connector HTTP ${response.status}`,
-      });
-      return;
-    }
-
+    const payload = await syncNativeGojekDrivers();
     res.json({ ok: true, ...payload });
   } catch (error) {
-    req.log.error({ error }, "Gojek server connector sync failed");
-    res.status(502).json({ error: error instanceof Error ? error.message : "Sync Gojek server gagal." });
+    req.log.error({ error }, "Gojek Hostinger native connector sync failed");
+    const message = error instanceof Error ? error.message : "Sync Gojek server gagal.";
+    res.status(message.includes("sedang berjalan") ? 409 : 502).json({ error: message });
   }
 });
 
