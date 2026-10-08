@@ -16,3 +16,5 @@ Runtime target:
 - VPS: srv1792369
 - service: cst-gojek-vps-worker
 - local health: http://127.0.0.1:18083
+
+Deployment note: Fleet web/API remains on Hostinger native deployment; browser execution runs only in the VPS worker.
