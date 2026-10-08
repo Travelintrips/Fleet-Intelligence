@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { runFleetAutoReminderSweep } from "./lib/fleet-wa-reminder";
 import { runFleetAlertSweep } from "./lib/fleet-alerts";
+import { runFleetGojekScheduledSyncSweep } from "./lib/fleet-gojek-scheduler";
 import { initializeProductionSessionSigning, isDevelopmentEnvironment } from "./routes/dev-auth";
 
 const port = Number(process.env.PORT || 8080);
@@ -21,6 +22,8 @@ const tick = async () => {
   if (running) return;
   running = true;
   try {
+    const scheduledSync = await runFleetGojekScheduledSyncSweep();
+    if (scheduledSync.length) logger.info({ scheduledSync }, "Gojek daily sync jobs queued");
     const [reminders, alerts] = await Promise.all([
       runFleetAutoReminderSweep(),
       runFleetAlertSweep(),
