@@ -263,6 +263,21 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     const retryBackoffMs = 30 * 60 * 1000;
     if (lastAttemptMs && Date.now() - lastAttemptMs < retryBackoffMs) continue;
 
+    // Fresh Gojek export is mandatory for scheduled WA reminders.
+    const freshSync = await pool.query<{ id: string }>(
+      `SELECT id FROM public.fleet_gojek_sync_jobs
+        WHERE company_id=$1 AND status='succeeded'
+          AND (finished_at AT TIME ZONE 'Asia/Jakarta')::date =
+              (NOW() AT TIME ZONE 'Asia/Jakarta')::date
+        ORDER BY finished_at DESC LIMIT 1`,
+      [companyId],
+    );
+    if (!freshSync.rowCount) {
+      await updateWorkerState(companyId, {
+        error: 'Reminder ditunda: sinkronisasi Gojek hari ini belum berhasil. Tidak mengirim dengan data lama.',
+      });
+      continue;
+    }
     const wa = await getFleetWaGatewayStatus().catch(() => null);
     const waReady = Boolean(
       wa?.configured &&
