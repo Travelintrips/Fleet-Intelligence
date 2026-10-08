@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, existsSync } from "node:fs";
 import * as puppeteer from "puppeteer-core";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -264,8 +264,17 @@ export async function getNativeGojekConnectorHealth() {
 
   if (configured) {
     browserReady = existsSync(executable);
-    if (!browserReady) {
-      error = `Prepared Chromium belum tersedia pada deployment: ${executable}`;
+    if (browserReady) {
+      try {
+        chmodSync(executable, 0o755);
+        accessSync(executable, fsConstants.X_OK);
+      } catch (e) {
+        browserReady = false;
+        error = e instanceof Error ? e.message : String(e);
+      }
+    }
+    if (!browserReady && !error) {
+      error = `Prepared Chromium belum tersedia atau tidak executable: ${executable}`;
     }
   }
 
@@ -303,6 +312,10 @@ export async function syncNativeGojekDrivers() {
     if (!existsSync(executablePath)) {
       throw new Error(`Prepared Chromium tidak ditemukan: ${executablePath}`);
     }
+
+    stage = "chmod-browser";
+    chmodSync(executablePath, 0o755);
+    accessSync(executablePath, fsConstants.X_OK);
 
     stage = "session";
     sessionDir = await mkdtemp(join(tmpdir(), "cst-gojek-session-"));

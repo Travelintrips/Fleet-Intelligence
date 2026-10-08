@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -19,6 +19,8 @@ const executablePath = await chromium.executablePath();
 if (!existsSync(executablePath)) {
   throw new Error(`Chromium build-time extraction failed: ${executablePath}`);
 }
+
+chmodSync(executablePath, 0o755);
 
 await writeFile(
   resolve(runtimeDir, "runtime.json"),
