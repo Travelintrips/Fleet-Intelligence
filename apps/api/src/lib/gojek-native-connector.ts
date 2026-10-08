@@ -12,17 +12,21 @@ type LastRun = {
 let running = false;
 let lastRun: LastRun | null = null;
 
-let playwrightPromise: Promise<typeof import("playwright")> | null = null;
+let runtimePromise: Promise<{
+  playwrightChromium: typeof import("playwright-core").chromium;
+  portableChromium: typeof import("@sparticuz/chromium").default;
+}> | null = null;
 
-async function getChromium() {
-  if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-    process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
-  }
-  playwrightPromise ??= import("playwright");
-  const { chromium } = await playwrightPromise;
-  return chromium;
+async function getBrowserRuntime() {
+  runtimePromise ??= Promise.all([
+    import("playwright-core"),
+    import("@sparticuz/chromium"),
+  ]).then(([playwright, sparticuz]) => ({
+    playwrightChromium: playwright.chromium,
+    portableChromium: sparticuz.default,
+  }));
+  return runtimePromise;
 }
-
 
 function getConfig() {
   const fleetBaseUrl = String(
@@ -135,11 +139,11 @@ export async function getNativeGojekConnectorHealth() {
 
   try {
     getConfig();
-    const chromium = await getChromium();
-    executable = chromium.executablePath();
+    const { portableChromium } = await getBrowserRuntime();
+    executable = await portableChromium.executablePath();
     browserReady = Boolean(executable && existsSync(executable));
     if (!browserReady) {
-      error = `Chromium runtime belum terpasang pada Hostinger. Expected: ${executable ?? "unknown"}`;
+      error = `Portable Chromium belum siap. Expected: ${executable ?? "unknown"}`;
     }
   } catch (e) {
     configured = false;
@@ -153,9 +157,9 @@ export async function getNativeGojekConnectorHealth() {
     busy: running,
     lastRun,
     service: "cst-gojek-native-connector",
-    runtime: "hostinger-native",
+    runtime: "hostinger-native-portable-chromium",
     executablePath: executable,
-    browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null,
+    browsersPath: "portable",
     error,
   };
 }
@@ -168,10 +172,12 @@ export async function syncNativeGojekDrivers() {
 
   try {
     const { portalUrl } = getConfig();
-    const chromium = await getChromium();
-    const browser = await chromium.launch({
+    const { playwrightChromium, portableChromium } = await getBrowserRuntime();
+    const executablePath = await portableChromium.executablePath();
+    const browser = await playwrightChromium.launch({
+      executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: portableChromium.args,
     });
 
     try {
