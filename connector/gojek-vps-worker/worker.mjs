@@ -29,7 +29,8 @@ function signedHeaders(method, canonicalPath, body) {
 }
 
 async function post(localPath, body) {
-  const response = await fetch(BASE + "/api/logistics/fleet" + localPath, {
+  const actualPath = "/api/logistics/fleet" + localPath;
+  const response = await fetch(BASE + actualPath, {
     method: "POST",
     headers: signedHeaders("POST", localPath, body),
     body: JSON.stringify(body ?? {}),
@@ -45,32 +46,61 @@ async function post(localPath, body) {
 }
 
 async function loginIfNeeded(page, credentials) {
-  const email = page.locator(
-    'input[type="email"], input[name*="email" i], input[autocomplete="username"]'
-  ).first();
-  const password = page.locator(
-    'input[type="password"], input[name*="password" i], input[autocomplete="current-password"]'
-  ).first();
+  const email = page.locator('input[name="email"], input[type="email"]').first();
+  const password = page.locator('input[name="password"], input[type="password"]').first();
 
-  if (await email.isVisible().catch(() => false)) await email.fill(credentials.email);
-  if (await password.isVisible().catch(() => false)) await password.fill(credentials.password);
+  const loginAppeared = await email.waitFor({ state: 'visible', timeout: 6000 })
+    .then(() => true)
+    .catch(() => false);
 
-  if ((await email.isVisible().catch(() => false)) || (await password.isVisible().catch(() => false))) {
-    const submit = page.locator(
-      'button[type="submit"], input[type="submit"], button:has-text("Login"), button:has-text("Masuk"), button:has-text("Sign in")'
-    ).first();
-    if (!(await submit.isVisible().catch(() => false))) {
-      throw new Error("Form login ditemukan tetapi tombol login tidak dikenali.");
-    }
-    await Promise.all([
-      page.waitForLoadState("domcontentloaded").catch(() => undefined),
-      submit.click(),
-    ]);
+  if (!loginAppeared && !page.url().includes('/login')) return;
+
+  if (!loginAppeared) {
+    await email.waitFor({ state: 'visible', timeout: 15000 });
+  }
+  await password.waitFor({ state: 'visible', timeout: 15000 });
+
+  await email.fill(credentials.email);
+  await password.fill(credentials.password);
+
+  const submit = page.locator('button:has-text("Log in"), button:has-text("Login"), button[type="submit"], input[type="submit"]').first();
+  await submit.waitFor({ state: 'visible', timeout: 10000 });
+
+  const authResponsePromise = page.waitForResponse(
+    (response) => /\/api\/api\/v1\/auth\/login/.test(response.url()),
+    { timeout: 20000 }
+  ).catch(() => null);
+
+  await submit.click();
+  const authResponse = await authResponsePromise;
+  if (!authResponse) {
+    throw new Error('Request login Gojek tidak terdeteksi setelah tombol Log in ditekan.');
   }
 
-  const bodyText = await page.locator("body").innerText().catch(() => "");
+  const status = authResponse.status();
+  let success = null;
+  let apiMessage = '';
+  try {
+    const payload = await authResponse.json();
+    success = typeof payload?.success === 'boolean' ? payload.success : null;
+    apiMessage = String(payload?.error?.message ?? payload?.message ?? '').slice(0,500);
+  } catch {}
+
+  if (status < 200 || status >= 300 || success === false) {
+    throw new Error(`Login Gojek ditolak. HTTP ${status}${apiMessage ? `: ${apiMessage}` : ''}`);
+  }
+
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 20000 }).catch(() => undefined);
+  await page.waitForTimeout(2500);
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
   if (/captcha|verification|verify|otp|one-time|kode verifikasi|security check/i.test(bodyText)) {
-    throw new Error("Gojek meminta verifikasi tambahan. Sinkronisasi dihentikan untuk penyelesaian manual.");
+    throw new Error('Gojek meminta verifikasi tambahan. Sinkronisasi dihentikan untuk penyelesaian manual.');
+  }
+
+  if (page.url().includes('/login')) {
+    const messages = bodyText.split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(0,60);
+    throw new Error(`Login Gojek API HTTP ${status} tetapi sesi browser kembali ke login. messages=${JSON.stringify(messages)}`);
   }
 }
 
@@ -102,7 +132,12 @@ async function syncJob(payload) {
     ).first();
 
     if (!(await exportButton.isVisible().catch(() => false))) {
-      throw new Error("Tombol Export Drivers tidak ditemukan pada portal Gojek.");
+      const title = await page.title().catch(() => "");
+      const url = page.url();
+      const buttons = await page.locator('button, a, [role="button"]').allTextContents().catch(() => []);
+      const sample = buttons.map((x) => x.trim()).filter(Boolean).slice(0, 80);
+      await page.screenshot({ path: "/tmp/gojek-export-missing.png", fullPage: true }).catch(() => undefined);
+      throw new Error(`Tombol Export Drivers tidak ditemukan. url=${url} title=${title} controls=${JSON.stringify(sample)}`);
     }
 
     const [download] = await Promise.all([
@@ -152,27 +187,19 @@ async function tick() {
       busy = false;
     }
   } catch (error) {
-    last = {
-      at: new Date().toISOString(),
-      status: "poll-error",
-      httpStatus: error?.status,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    const status = error?.status;
+    const message = error instanceof Error ? error.message : String(error);
+    last = { at: new Date().toISOString(), status: "poll-error", httpStatus: status, error: message };
   }
 }
 
-http.createServer((_req, res) => {
+const server = http.createServer((_req, res) => {
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({
-    ok: true,
-    service: "cst-gojek-vps-worker",
-    workerId: WORKER_ID,
-    version: VERSION,
-    busy,
-    last,
-  }));
-}).listen(PORT, "0.0.0.0");
+  res.end(JSON.stringify({ ok: true, service: "cst-gojek-vps-worker", workerId: WORKER_ID, version: VERSION, busy, last }));
+});
+server.listen(PORT, "0.0.0.0");
 
 setInterval(() => void tick(), POLL_MS);
 void tick();
+
 console.log(`CST Gojek VPS worker ${VERSION} started as ${WORKER_ID}`);
