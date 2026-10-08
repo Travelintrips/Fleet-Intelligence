@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import * as puppeteer from "puppeteer-core";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -42,11 +43,8 @@ const CHROMIUM_ARGS = [
   "--use-mock-keychain",
 ];
 
-let runtimePromise: Promise<typeof import("puppeteer-core")> | null = null;
-
-async function getBrowserRuntime() {
-  runtimePromise ??= import("puppeteer-core");
-  return runtimePromise;
+function getBrowserRuntime() {
+  return puppeteer;
 }
 
 function getPreparedExecutablePath() {
@@ -298,8 +296,8 @@ export async function syncNativeGojekDrivers() {
 
   try {
     const { portalUrl } = getConfig();
-    stage = "runtime-import";
-    const puppeteer = await getBrowserRuntime();
+    stage = "runtime-ready";
+    const puppeteer = getBrowserRuntime();
     const executablePath = getPreparedExecutablePath();
 
     if (!existsSync(executablePath)) {
