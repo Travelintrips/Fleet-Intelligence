@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { chromium } from "playwright";
 
 type LastRun = {
   startedAt: string;
@@ -12,6 +11,18 @@ type LastRun = {
 
 let running = false;
 let lastRun: LastRun | null = null;
+
+let playwrightPromise: Promise<typeof import("playwright")> | null = null;
+
+async function getChromium() {
+  if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
+  }
+  playwrightPromise ??= import("playwright");
+  const { chromium } = await playwrightPromise;
+  return chromium;
+}
+
 
 function getConfig() {
   const fleetBaseUrl = String(
@@ -116,17 +127,19 @@ async function loginIfNeeded(page: any) {
   }
 }
 
-export function getNativeGojekConnectorHealth() {
+export async function getNativeGojekConnectorHealth() {
   let configured = true;
   let browserReady = false;
   let error: string | null = null;
+  let executable: string | null = null;
 
   try {
     getConfig();
-    const executable = chromium.executablePath();
+    const chromium = await getChromium();
+    executable = chromium.executablePath();
     browserReady = Boolean(executable && existsSync(executable));
     if (!browserReady) {
-      error = `Chromium runtime belum terpasang pada Hostinger. Expected: ${executable}`;
+      error = `Chromium runtime belum terpasang pada Hostinger. Expected: ${executable ?? "unknown"}`;
     }
   } catch (e) {
     configured = false;
@@ -141,6 +154,8 @@ export function getNativeGojekConnectorHealth() {
     lastRun,
     service: "cst-gojek-native-connector",
     runtime: "hostinger-native",
+    executablePath: executable,
+    browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null,
     error,
   };
 }
@@ -153,6 +168,7 @@ export async function syncNativeGojekDrivers() {
 
   try {
     const { portalUrl } = getConfig();
+    const chromium = await getChromium();
     const browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
