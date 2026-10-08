@@ -1510,19 +1510,67 @@ router.get("/gojek-connector/server-status", async (req: AdminRequest, res) => {
 
 router.post("/gojek-connector/server-sync/drivers", async (req: AdminRequest, res) => {
   try {
-    companyId(req);
-    const health = await getNativeGojekConnectorHealth();
-    if (!health.configured) {
-      res.status(409).json({ error: health.error ?? "Server connector belum dikonfigurasi." });
+    const cid = companyId(req);
+    const health = await getGojekServerConnectorHealth();
+    if (!health.healthy) {
+      res.status(503).json({ error: health.error ?? "VPS worker belum Online." });
       return;
     }
 
-    const payload = await syncNativeGojekDrivers();
-    res.json({ ok: true, ...payload });
+    const existing = await pool.query<{ id: string; status: string }>(
+      `SELECT id,status
+         FROM public.fleet_gojek_sync_jobs
+        WHERE company_id=$1
+          AND status IN ('pending','running')
+        ORDER BY requested_at DESC
+        LIMIT 1`,
+      [cid],
+    );
+    if (existing.rows[0]) {
+      res.status(409).json({
+        error: "Sync Drivers Gojek sedang diproses.",
+        jobId: existing.rows[0].id,
+        status: existing.rows[0].status,
+      });
+      return;
+    }
+
+    const inserted = await pool.query<{ id: string; status: string; requested_at: string }>(
+      `INSERT INTO public.fleet_gojek_sync_jobs(company_id,requested_by,status)
+       VALUES($1,$2,'pending')
+       RETURNING id,status,requested_at`,
+      [cid, req.adminUser?.email ?? "unknown"],
+    );
+    const job = inserted.rows[0];
+    res.status(202).json({ ok: true, jobId: job.id, status: job.status, requestedAt: job.requested_at });
   } catch (error) {
-    req.log.error({ error }, "Gojek Hostinger native connector sync failed");
-    const message = error instanceof Error ? error.message : "Sync Gojek server gagal.";
-    res.status(message.includes("sedang berjalan") ? 409 : 502).json({ error: message });
+    req.log.error({ error }, "Gojek VPS sync enqueue failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Gagal membuat job Sync Gojek." });
+  }
+});
+
+router.get("/gojek-connector/server-sync/jobs/:jobId", async (req: AdminRequest, res) => {
+  try {
+    const cid = companyId(req);
+    const jobId = String(req.params.jobId ?? "").trim();
+    const result = await pool.query(
+      `SELECT id,status,requested_at,started_at,finished_at,heartbeat_at,
+              worker_id,error,result,updated_at
+         FROM public.fleet_gojek_sync_jobs
+        WHERE id=$1 AND company_id=$2
+        LIMIT 1`,
+      [jobId, cid],
+    );
+    const job = result.rows[0];
+    if (!job) {
+      res.status(404).json({ error: "Job Sync Gojek tidak ditemukan." });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, job });
+  } catch (error) {
+    req.log.error({ error }, "Gojek VPS sync job status failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Gagal membaca status job Sync Gojek." });
   }
 });
 
