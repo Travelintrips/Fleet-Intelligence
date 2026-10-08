@@ -278,7 +278,7 @@ export async function syncNativeGojekDrivers() {
 
   running = true;
   const startedAt = new Date().toISOString();
-  let downloadDir: string | null = null;
+  let sessionDir: string | null = null;
 
   try {
     const { portalUrl } = getConfig();
@@ -289,13 +289,34 @@ export async function syncNativeGojekDrivers() {
       throw new Error(`Prepared Chromium tidak ditemukan: ${executablePath}`);
     }
 
-    downloadDir = await mkdtemp(join(tmpdir(), "cst-gojek-download-"));
+    sessionDir = await mkdtemp(join(tmpdir(), "cst-gojek-session-"));
+    const profileDir = join(sessionDir, "profile");
+    const downloadDir = join(sessionDir, "downloads");
+    const cacheDir = join(sessionDir, "cache");
+
+    await mkdir(profileDir, { recursive: true });
+    await mkdir(downloadDir, { recursive: true });
+    await mkdir(cacheDir, { recursive: true });
 
     const browser = await puppeteer.launch({
       executablePath,
       headless: true,
-      args: portableChromium.args,
+      args: [
+        ...portableChromium.args,
+        `--user-data-dir=${profileDir}`,
+        `--disk-cache-dir=${cacheDir}`,
+        "--disable-dev-shm-usage",
+      ],
+      userDataDir: profileDir,
       defaultViewport: { width: 1440, height: 1000 },
+      env: {
+        ...process.env,
+        HOME: sessionDir,
+        XDG_CACHE_HOME: cacheDir,
+        TMPDIR: sessionDir,
+        TMP: sessionDir,
+        TEMP: sessionDir,
+      },
     });
 
     try {
@@ -352,21 +373,30 @@ export async function syncNativeGojekDrivers() {
       await browser.close().catch(() => undefined);
     }
   } catch (error) {
+    const err = error as NodeJS.ErrnoException;
     const message = error instanceof Error ? error.message : String(error);
+    const details = [
+      err.code ? `code=${err.code}` : null,
+      err.path ? `path=${err.path}` : null,
+      err.syscall ? `syscall=${err.syscall}` : null,
+    ].filter(Boolean).join(" ");
+
+    const fullMessage = details ? `${message} [${details}]` : message;
 
     lastRun = {
       startedAt,
       finishedAt: new Date().toISOString(),
       ok: false,
       type: "drivers",
-      error: message,
+      error: fullMessage,
     };
 
-    throw error;
+    throw new Error(fullMessage);
   } finally {
     running = false;
-    if (downloadDir) {
-      await rm(downloadDir, { recursive: true, force: true }).catch(() => undefined);
+    if (sessionDir) {
+      await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 }
+
