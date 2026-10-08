@@ -15,22 +15,37 @@ type LastRun = {
 let running = false;
 let lastRun: LastRun | null = null;
 
-let runtimePromise: Promise<{
-  puppeteer: typeof import("puppeteer-core");
-  portableChromium: typeof import("@sparticuz/chromium").default;
-}> | null = null;
+const CHROMIUM_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  "--disable-background-networking",
+  "--disable-background-timer-throttling",
+  "--disable-backgrounding-occluded-windows",
+  "--disable-breakpad",
+  "--disable-component-extensions-with-background-pages",
+  "--disable-default-apps",
+  "--disable-extensions",
+  "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints",
+  "--disable-hang-monitor",
+  "--disable-ipc-flooding-protection",
+  "--disable-popup-blocking",
+  "--disable-prompt-on-repost",
+  "--disable-renderer-backgrounding",
+  "--disable-sync",
+  "--metrics-recording-only",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--password-store=basic",
+  "--use-mock-keychain",
+];
+
+let runtimePromise: Promise<typeof import("puppeteer-core")> | null = null;
 
 async function getBrowserRuntime() {
-  runtimePromise ??= Promise.all([
-    import("puppeteer-core"),
-    import("@sparticuz/chromium"),
-  ]).then(([puppeteer, sparticuz]) => {
-    sparticuz.default.setGraphicsMode = false;
-    return {
-      puppeteer,
-      portableChromium: sparticuz.default,
-    };
-  });
+  runtimePromise ??= import("puppeteer-core");
   return runtimePromise;
 }
 
@@ -283,7 +298,8 @@ export async function syncNativeGojekDrivers() {
 
   try {
     const { portalUrl } = getConfig();
-    const { puppeteer, portableChromium } = await getBrowserRuntime();
+    stage = "runtime-import";
+    const puppeteer = await getBrowserRuntime();
     const executablePath = getPreparedExecutablePath();
 
     if (!existsSync(executablePath)) {
@@ -304,9 +320,8 @@ export async function syncNativeGojekDrivers() {
       executablePath,
       headless: true,
       args: [
-        ...portableChromium.args.filter((arg) => !arg.startsWith("--user-data-dir=")),
+        ...CHROMIUM_ARGS,
         `--disk-cache-dir=${cacheDir}`,
-        "--disable-dev-shm-usage",
       ],
       userDataDir: profileDir,
       defaultViewport: { width: 1440, height: 1000 },
