@@ -20,6 +20,8 @@ let runtimePromise: Promise<{
   portableChromium: typeof import("@sparticuz/chromium").default;
 }> | null = null;
 
+let executablePathPromise: Promise<string> | null = null;
+
 async function getBrowserRuntime() {
   runtimePromise ??= Promise.all([
     import("puppeteer-core"),
@@ -29,6 +31,18 @@ async function getBrowserRuntime() {
     portableChromium: sparticuz.default,
   }));
   return runtimePromise;
+}
+
+async function getPortableExecutablePath() {
+  if (!executablePathPromise) {
+    executablePathPromise = getBrowserRuntime()
+      .then(({ portableChromium }) => portableChromium.executablePath())
+      .catch((error) => {
+        executablePathPromise = null;
+        throw error;
+      });
+  }
+  return executablePathPromise;
 }
 
 function getConfig() {
@@ -237,16 +251,23 @@ export async function getNativeGojekConnectorHealth() {
 
   try {
     getConfig();
-    const { portableChromium } = await getBrowserRuntime();
-    executable = await portableChromium.executablePath();
-    browserReady = Boolean(executable && existsSync(executable));
-
-    if (!browserReady) {
-      error = `Portable Chromium belum siap. Expected: ${executable ?? "unknown"}`;
-    }
   } catch (e) {
     configured = false;
     error = e instanceof Error ? e.message : String(e);
+  }
+
+  if (configured) {
+    try {
+      executable = await getPortableExecutablePath();
+      browserReady = Boolean(executable && existsSync(executable));
+
+      if (!browserReady) {
+        error = `Portable Chromium belum siap. Expected: ${executable ?? "unknown"}`;
+      }
+    } catch (e) {
+      browserReady = false;
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   return {
@@ -276,7 +297,7 @@ export async function syncNativeGojekDrivers() {
   try {
     const { portalUrl } = getConfig();
     const { puppeteer, portableChromium } = await getBrowserRuntime();
-    const executablePath = await portableChromium.executablePath();
+    const executablePath = await getPortableExecutablePath();
 
     if (!executablePath || !existsSync(executablePath)) {
       throw new Error(`Portable Chromium tidak ditemukan: ${executablePath ?? "unknown"}`);
