@@ -11,9 +11,7 @@ export async function runFleetGojekScheduledSyncSweep(): Promise<number[]> {
     timeZone: "Asia/Jakarta", hour: "2-digit", hourCycle: "h23"
   }).format(new Date()));
   if (hour < 1) return [];
-  const day = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit"
-  }).format(new Date());
+  const day = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const actor = `fleet-scheduler-0100-wib:${day}`;
   const client = await pool.connect();
   const queued: number[] = [];
