@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +22,15 @@ let runtimePromise: Promise<{
 
 let executablePathPromise: Promise<string> | null = null;
 
+const chromiumTmpDir = join(tmpdir(), `cst-gojek-chromium-${process.pid}`);
+
+async function prepareChromiumTmpDir() {
+  await mkdir(chromiumTmpDir, { recursive: true });
+  process.env.TMPDIR = chromiumTmpDir;
+  process.env.TMP = chromiumTmpDir;
+  process.env.TEMP = chromiumTmpDir;
+}
+
 async function getBrowserRuntime() {
   runtimePromise ??= Promise.all([
     import("puppeteer-core"),
@@ -35,12 +44,23 @@ async function getBrowserRuntime() {
 
 async function getPortableExecutablePath() {
   if (!executablePathPromise) {
-    executablePathPromise = getBrowserRuntime()
-      .then(({ portableChromium }) => portableChromium.executablePath())
-      .catch((error) => {
-        executablePathPromise = null;
-        throw error;
-      });
+    executablePathPromise = (async () => {
+      await prepareChromiumTmpDir();
+      const { portableChromium } = await getBrowserRuntime();
+      return portableChromium.executablePath();
+    })().catch(async (error) => {
+      executablePathPromise = null;
+
+      const message = error instanceof Error ? error.message : String(error);
+      if (/EEXIST/i.test(message)) {
+        await rm(chromiumTmpDir, { recursive: true, force: true }).catch(() => undefined);
+        await prepareChromiumTmpDir();
+        const { portableChromium } = await getBrowserRuntime();
+        return portableChromium.executablePath();
+      }
+
+      throw error;
+    });
   }
   return executablePathPromise;
 }
