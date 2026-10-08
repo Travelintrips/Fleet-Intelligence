@@ -6,10 +6,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
-import {
-  getNativeGojekConnectorHealth,
-  syncNativeGojekDrivers,
-} from "../lib/gojek-native-connector";
+import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
