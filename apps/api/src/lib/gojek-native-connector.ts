@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 type LastRun = {
   startedAt: string;
@@ -20,49 +20,22 @@ let runtimePromise: Promise<{
   portableChromium: typeof import("@sparticuz/chromium").default;
 }> | null = null;
 
-let executablePathPromise: Promise<string> | null = null;
-
-const chromiumTmpDir = join(tmpdir(), `cst-gojek-chromium-${process.pid}`);
-
-async function prepareChromiumTmpDir() {
-  await mkdir(chromiumTmpDir, { recursive: true });
-  process.env.TMPDIR = chromiumTmpDir;
-  process.env.TMP = chromiumTmpDir;
-  process.env.TEMP = chromiumTmpDir;
-}
-
 async function getBrowserRuntime() {
   runtimePromise ??= Promise.all([
     import("puppeteer-core"),
     import("@sparticuz/chromium"),
-  ]).then(([puppeteer, sparticuz]) => ({
-    puppeteer,
-    portableChromium: sparticuz.default,
-  }));
+  ]).then(([puppeteer, sparticuz]) => {
+    sparticuz.default.setGraphicsMode = false;
+    return {
+      puppeteer,
+      portableChromium: sparticuz.default,
+    };
+  });
   return runtimePromise;
 }
 
-async function getPortableExecutablePath() {
-  if (!executablePathPromise) {
-    executablePathPromise = (async () => {
-      await prepareChromiumTmpDir();
-      const { portableChromium } = await getBrowserRuntime();
-      return portableChromium.executablePath();
-    })().catch(async (error) => {
-      executablePathPromise = null;
-
-      const message = error instanceof Error ? error.message : String(error);
-      if (/EEXIST/i.test(message)) {
-        await rm(chromiumTmpDir, { recursive: true, force: true }).catch(() => undefined);
-        await prepareChromiumTmpDir();
-        const { portableChromium } = await getBrowserRuntime();
-        return portableChromium.executablePath();
-      }
-
-      throw error;
-    });
-  }
-  return executablePathPromise;
+function getPreparedExecutablePath() {
+  return resolve(import.meta.dirname, "chromium-runtime", "chromium");
 }
 
 function getConfig() {
@@ -267,7 +240,7 @@ export async function getNativeGojekConnectorHealth() {
   let configured = true;
   let browserReady = false;
   let error: string | null = null;
-  let executable: string | null = null;
+  const executable = getPreparedExecutablePath();
 
   try {
     getConfig();
@@ -277,16 +250,9 @@ export async function getNativeGojekConnectorHealth() {
   }
 
   if (configured) {
-    try {
-      executable = await getPortableExecutablePath();
-      browserReady = Boolean(executable && existsSync(executable));
-
-      if (!browserReady) {
-        error = `Portable Chromium belum siap. Expected: ${executable ?? "unknown"}`;
-      }
-    } catch (e) {
-      browserReady = false;
-      error = e instanceof Error ? e.message : String(e);
+    browserReady = existsSync(executable);
+    if (!browserReady) {
+      error = `Prepared Chromium belum tersedia pada deployment: ${executable}`;
     }
   }
 
@@ -297,9 +263,9 @@ export async function getNativeGojekConnectorHealth() {
     busy: running,
     lastRun,
     service: "cst-gojek-native-connector",
-    runtime: "hostinger-native-puppeteer-portable-chromium",
+    runtime: "hostinger-buildtime-puppeteer-chromium",
     executablePath: executable,
-    browsersPath: "portable",
+    browsersPath: "buildtime-bundled",
     engine: "puppeteer-core",
     error,
   };
@@ -317,10 +283,10 @@ export async function syncNativeGojekDrivers() {
   try {
     const { portalUrl } = getConfig();
     const { puppeteer, portableChromium } = await getBrowserRuntime();
-    const executablePath = await getPortableExecutablePath();
+    const executablePath = getPreparedExecutablePath();
 
-    if (!executablePath || !existsSync(executablePath)) {
-      throw new Error(`Portable Chromium tidak ditemukan: ${executablePath ?? "unknown"}`);
+    if (!existsSync(executablePath)) {
+      throw new Error(`Prepared Chromium tidak ditemukan: ${executablePath}`);
     }
 
     downloadDir = await mkdtemp(join(tmpdir(), "cst-gojek-download-"));
