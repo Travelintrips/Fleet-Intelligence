@@ -125,7 +125,23 @@ async function syncJob(payload) {
       });
     }
 
-    await page.waitForLoadState("networkidle").catch(() => undefined);
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => undefined);
+
+    // A Gojek session can expire between navigation and export. Retry login
+    // once, using the existing official login form, without bypassing OTP/CAPTCHA.
+    const needsLogin = async () =>
+      /\/login(?:[/?#]|$)/i.test(new URL(page.url()).pathname) ||
+      await page.locator('input[type="password"]').first().isVisible().catch(() => false);
+    if (await needsLogin()) {
+      await loginIfNeeded(page, credentials);
+      await page.goto(`${portalUrl}/drivers?page=1&page_size=100`, {
+        waitUntil: "domcontentloaded", timeout: 45000,
+      });
+      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => undefined);
+    }
+    if (await needsLogin()) {
+      throw new Error("Sesi Gojek belum terautentikasi setelah auto re-login. Selesaikan login resmi atau verifikasi tambahan.");
+    }
 
     const exportButton = page.locator(
       'button:has-text("Export"), a:has-text("Export"), [role="button"]:has-text("Export")'
