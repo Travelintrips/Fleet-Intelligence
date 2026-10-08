@@ -11,6 +11,20 @@ const isProduction = process.env.APP_ENV === "production" || process.env.NODE_EN
 const appOrigin = String(process.env.APP_BASE_URL || "https://fleet.cstlogistic.co.id").replace(/\/$/, "");
 
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+if (isProduction) {
+  app.use((req, res, next) => {
+    const forwardedProto = String(req.get("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase();
+    const isHttps = req.secure || forwardedProto === "https";
+    if (!isHttps) {
+      const host = req.get("host") || "fleet.cstlogistic.co.id";
+      res.redirect(308, `https://${host}${req.originalUrl}`);
+      return;
+    }
+    next();
+  });
+}
 app.use(pinoHttp({ logger }));
 app.use(cors({
   origin: isProduction ? appOrigin : true,
