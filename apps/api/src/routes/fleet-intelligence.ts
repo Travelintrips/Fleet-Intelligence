@@ -6,10 +6,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
-import {
-  getNativeGojekConnectorHealth,
-  syncNativeGojekDrivers,
-} from "../lib/gojek-native-connector";
+import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -20,8 +17,39 @@ import {
 
 const router = Router();
 
-function getGojekServerConnectorHealth() {
-  return getNativeGojekConnectorHealth();
+async function getGojekServerConnectorHealth() {
+  const worker = await pool.query<{
+    worker_id: string;
+    heartbeat_at: string;
+    version: string | null;
+    last_job_id: string | null;
+    last_status: string | null;
+    last_error: string | null;
+  }>(
+    `SELECT worker_id,heartbeat_at,version,last_job_id,last_status,last_error
+       FROM public.fleet_gojek_connector_workers
+      ORDER BY heartbeat_at DESC
+      LIMIT 1`,
+  );
+  const row = worker.rows[0] ?? null;
+  const heartbeatAt = row?.heartbeat_at ? new Date(row.heartbeat_at).getTime() : 0;
+  const healthy = Boolean(row && Date.now() - heartbeatAt <= 30_000);
+  return {
+    configured: true,
+    healthy,
+    busy: row?.last_status === "running",
+    lastRun: row ? {
+      workerId: row.worker_id,
+      heartbeatAt: row.heartbeat_at,
+      version: row.version,
+      lastJobId: row.last_job_id,
+      lastStatus: row.last_status,
+      lastError: row.last_error,
+    } : null,
+    service: "cst-gojek-vps-worker",
+    runtime: "vps-docker",
+    error: healthy ? null : (row?.last_error ?? "VPS worker belum heartbeat."),
+  };
 }
 
 function connectorSecretMatches(value: unknown): boolean {
@@ -150,6 +178,218 @@ router.get("/gojek-connector/runtime-credentials", (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("Pragma", "no-cache");
   res.json({ email, password });
+});
+
+router.post("/gojek-connector/worker/claim", async (req, res) => {
+  const auth = verifyGojekWorkerRequest(req);
+  if (!auth.ok) {
+    res.status(401).json({ error: auth.error });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE public.fleet_gojek_sync_jobs
+          SET status='pending', worker_id=NULL, started_at=NULL,
+              heartbeat_at=NULL, updated_at=NOW(),
+              error=COALESCE(error,'') || CASE WHEN COALESCE(error,'')='' THEN '' ELSE E'\\n' END || 'Recovered stale running job'
+        WHERE status='running'
+          AND COALESCE(heartbeat_at,started_at,requested_at) < NOW() - INTERVAL '10 minutes'`,
+    );
+
+    await client.query(
+      `INSERT INTO public.fleet_gojek_connector_workers(
+         worker_id,heartbeat_at,version,last_status,updated_at
+       ) VALUES($1,NOW(),$2,'idle',NOW())
+       ON CONFLICT(worker_id) DO UPDATE
+         SET heartbeat_at=EXCLUDED.heartbeat_at,
+             version=EXCLUDED.version,
+             updated_at=NOW()`,
+      [auth.workerId, String(req.body?.version ?? "unknown").slice(0,64)],
+    );
+
+    const claimed = await client.query<{
+      id: string;
+      company_id: number;
+      requested_by: string;
+      requested_at: string;
+    }>(
+      `WITH next_job AS (
+         SELECT id
+           FROM public.fleet_gojek_sync_jobs
+          WHERE status='pending'
+          ORDER BY requested_at ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+       UPDATE public.fleet_gojek_sync_jobs j
+          SET status='running',
+              started_at=COALESCE(started_at,NOW()),
+              heartbeat_at=NOW(),
+              worker_id=$1,
+              updated_at=NOW()
+        WHERE j.id=(SELECT id FROM next_job)
+       RETURNING j.id,j.company_id,j.requested_by,j.requested_at`,
+      [auth.workerId],
+    );
+
+    const job = claimed.rows[0] ?? null;
+    if (job) {
+      await client.query(
+        `UPDATE public.fleet_gojek_connector_workers
+            SET last_job_id=$2,last_status='running',last_error=NULL,
+                heartbeat_at=NOW(),updated_at=NOW()
+          WHERE worker_id=$1`,
+        [auth.workerId, job.id],
+      );
+    }
+    await client.query("COMMIT");
+
+    if (!job) {
+      res.json({ ok: true, job: null });
+      return;
+    }
+
+    const email = String(process.env.GOJEK_LOGIN_EMAIL ?? "").trim();
+    const password = String(process.env.GOJEK_LOGIN_PASSWORD ?? "");
+    if (!email || !password) {
+      await pool.query(
+        `UPDATE public.fleet_gojek_sync_jobs
+            SET status='failed',finished_at=NOW(),updated_at=NOW(),
+                error='Credential Gojek belum dikonfigurasi di Hostinger Secrets.'
+          WHERE id=$1`,
+        [job.id],
+      );
+      res.status(503).json({ error: "Credential Gojek belum dikonfigurasi di Hostinger Secrets." });
+      return;
+    }
+
+    const cfg = getGojekConnectorConfig();
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      job,
+      portalUrl: cfg.portalUrl,
+      allowedHost: cfg.allowedHost,
+      credentials: { email, password },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ error }, "Gojek VPS worker claim failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Worker claim gagal." });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/gojek-connector/worker/handoff", async (req, res) => {
+  const auth = verifyGojekWorkerRequest(req);
+  if (!auth.ok) {
+    res.status(401).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const jobId = String(req.body?.jobId ?? "").trim();
+    const fileName = String(req.body?.fileName ?? "gojek-export.csv").trim().slice(0,255);
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    if (!jobId || !content.trim()) {
+      res.status(400).json({ error: "jobId dan CSV wajib diisi." });
+      return;
+    }
+
+    const job = await pool.query<{ company_id: number; status: string }>(
+      `SELECT company_id,status
+         FROM public.fleet_gojek_sync_jobs
+        WHERE id=$1 AND worker_id=$2
+        LIMIT 1`,
+      [jobId, auth.workerId],
+    );
+    const row = job.rows[0];
+    if (!row || row.status !== "running") {
+      res.status(409).json({ error: "Job tidak ditemukan atau bukan milik worker ini." });
+      return;
+    }
+
+    const cfg = getGojekConnectorConfig();
+    const sizeBytes = Buffer.byteLength(content, "utf8");
+    if (sizeBytes > cfg.maxFileMb * 1024 * 1024) {
+      res.status(413).json({ error: `File melebihi batas ${cfg.maxFileMb} MB.` });
+      return;
+    }
+
+    const exportType = detectGojekExportType(content);
+    const result = exportType === "driver_snapshot"
+      ? await importDriverSnapshotConnectorCsv({
+          companyId: Number(row.company_id),
+          content,
+          fileName,
+          actor: `gojek-vps-worker:${auth.workerId}`,
+        })
+      : await importGojekConnectorCsv({
+          companyId: Number(row.company_id),
+          content,
+          fileName,
+          actor: `gojek-vps-worker:${auth.workerId}`,
+        });
+
+    await pool.query(
+      `UPDATE public.fleet_gojek_sync_jobs
+          SET status='succeeded',finished_at=NOW(),heartbeat_at=NOW(),
+              result=$2::jsonb,error=NULL,updated_at=NOW()
+        WHERE id=$1`,
+      [jobId, JSON.stringify({ exportType, ...result })],
+    );
+    await pool.query(
+      `UPDATE public.fleet_gojek_connector_workers
+          SET heartbeat_at=NOW(),last_job_id=$2,last_status='idle',
+              last_error=NULL,updated_at=NOW()
+        WHERE worker_id=$1`,
+      [auth.workerId, jobId],
+    );
+
+    res.status(201).json({ ok: true, exportType, ...result });
+  } catch (error) {
+    req.log.error({ error }, "Gojek VPS worker handoff failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Worker handoff gagal." });
+  }
+});
+
+router.post("/gojek-connector/worker/fail", async (req, res) => {
+  const auth = verifyGojekWorkerRequest(req);
+  if (!auth.ok) {
+    res.status(401).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const jobId = String(req.body?.jobId ?? "").trim();
+    const errorText = String(req.body?.error ?? "Worker gagal.").slice(0,4000);
+    if (!jobId) {
+      res.status(400).json({ error: "jobId wajib diisi." });
+      return;
+    }
+    await pool.query(
+      `UPDATE public.fleet_gojek_sync_jobs
+          SET status='failed',finished_at=NOW(),heartbeat_at=NOW(),
+              error=$3,updated_at=NOW()
+        WHERE id=$1 AND worker_id=$2`,
+      [jobId, auth.workerId, errorText],
+    );
+    await pool.query(
+      `UPDATE public.fleet_gojek_connector_workers
+          SET heartbeat_at=NOW(),last_job_id=$2,last_status='idle',
+              last_error=$3,updated_at=NOW()
+        WHERE worker_id=$1`,
+      [auth.workerId, jobId, errorText],
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ error }, "Gojek VPS worker fail report failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Worker fail report gagal." });
+  }
 });
 
 router.use((req, res, next) => {
@@ -1270,19 +1510,67 @@ router.get("/gojek-connector/server-status", async (req: AdminRequest, res) => {
 
 router.post("/gojek-connector/server-sync/drivers", async (req: AdminRequest, res) => {
   try {
-    companyId(req);
-    const health = await getNativeGojekConnectorHealth();
-    if (!health.configured) {
-      res.status(409).json({ error: health.error ?? "Server connector belum dikonfigurasi." });
+    const cid = companyId(req);
+    const health = await getGojekServerConnectorHealth();
+    if (!health.healthy) {
+      res.status(503).json({ error: health.error ?? "VPS worker belum Online." });
       return;
     }
 
-    const payload = await syncNativeGojekDrivers();
-    res.json({ ok: true, ...payload });
+    const existing = await pool.query<{ id: string; status: string }>(
+      `SELECT id,status
+         FROM public.fleet_gojek_sync_jobs
+        WHERE company_id=$1
+          AND status IN ('pending','running')
+        ORDER BY requested_at DESC
+        LIMIT 1`,
+      [cid],
+    );
+    if (existing.rows[0]) {
+      res.status(409).json({
+        error: "Sync Drivers Gojek sedang diproses.",
+        jobId: existing.rows[0].id,
+        status: existing.rows[0].status,
+      });
+      return;
+    }
+
+    const inserted = await pool.query<{ id: string; status: string; requested_at: string }>(
+      `INSERT INTO public.fleet_gojek_sync_jobs(company_id,requested_by,status)
+       VALUES($1,$2,'pending')
+       RETURNING id,status,requested_at`,
+      [cid, req.adminUser?.email ?? "unknown"],
+    );
+    const job = inserted.rows[0];
+    res.status(202).json({ ok: true, jobId: job.id, status: job.status, requestedAt: job.requested_at });
   } catch (error) {
-    req.log.error({ error }, "Gojek Hostinger native connector sync failed");
-    const message = error instanceof Error ? error.message : "Sync Gojek server gagal.";
-    res.status(message.includes("sedang berjalan") ? 409 : 502).json({ error: message });
+    req.log.error({ error }, "Gojek VPS sync enqueue failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Gagal membuat job Sync Gojek." });
+  }
+});
+
+router.get("/gojek-connector/server-sync/jobs/:jobId", async (req: AdminRequest, res) => {
+  try {
+    const cid = companyId(req);
+    const jobId = String(req.params.jobId ?? "").trim();
+    const result = await pool.query(
+      `SELECT id,status,requested_at,started_at,finished_at,heartbeat_at,
+              worker_id,error,result,updated_at
+         FROM public.fleet_gojek_sync_jobs
+        WHERE id=$1 AND company_id=$2
+        LIMIT 1`,
+      [jobId, cid],
+    );
+    const job = result.rows[0];
+    if (!job) {
+      res.status(404).json({ error: "Job Sync Gojek tidak ditemukan." });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, job });
+  } catch (error) {
+    req.log.error({ error }, "Gojek VPS sync job status failed");
+    res.status(500).json({ error: error instanceof Error ? error.message : "Gagal membaca status job Sync Gojek." });
   }
 });
 
