@@ -279,6 +279,7 @@ export async function syncNativeGojekDrivers() {
   running = true;
   const startedAt = new Date().toISOString();
   let sessionDir: string | null = null;
+  let stage = "prepare";
 
   try {
     const { portalUrl } = getConfig();
@@ -289,21 +290,21 @@ export async function syncNativeGojekDrivers() {
       throw new Error(`Prepared Chromium tidak ditemukan: ${executablePath}`);
     }
 
+    stage = "session";
     sessionDir = await mkdtemp(join(tmpdir(), "cst-gojek-session-"));
-    const profileDir = join(sessionDir, "profile");
     const downloadDir = join(sessionDir, "downloads");
     const cacheDir = join(sessionDir, "cache");
+    const profileDir = join(sessionDir, "profile");
 
-    await mkdir(profileDir, { recursive: true });
     await mkdir(downloadDir, { recursive: true });
     await mkdir(cacheDir, { recursive: true });
 
+    stage = "launch";
     const browser = await puppeteer.launch({
       executablePath,
       headless: true,
       args: [
-        ...portableChromium.args,
-        `--user-data-dir=${profileDir}`,
+        ...portableChromium.args.filter((arg) => !arg.startsWith("--user-data-dir=")),
         `--disk-cache-dir=${cacheDir}`,
         "--disable-dev-shm-usage",
       ],
@@ -320,22 +321,27 @@ export async function syncNativeGojekDrivers() {
     });
 
     try {
+      stage = "page";
       const page = await browser.newPage();
 
+      stage = "download-config";
       const client = await page.createCDPSession();
       await client.send("Browser.setDownloadBehavior", {
         behavior: "allow",
         downloadPath: downloadDir,
       });
 
+      stage = "open-drivers";
       await page.goto(`${portalUrl}/drivers?page=1&page_size=100`, {
         waitUntil: "domcontentloaded",
         timeout: 45_000,
       });
 
+      stage = "login";
       await loginIfNeeded(page);
 
       if (!page.url().includes("/drivers")) {
+        stage = "open-drivers-after-login";
         await page.goto(`${portalUrl}/drivers?page=1&page_size=100`, {
           waitUntil: "domcontentloaded",
           timeout: 45_000,
@@ -344,20 +350,27 @@ export async function syncNativeGojekDrivers() {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
+      stage = "find-export";
       const exportButton = await findExportButton(page);
       if (!exportButton) {
         throw new Error("Tombol Export Drivers tidak ditemukan pada portal Gojek.");
       }
 
+      stage = "click-export";
       await exportButton.click();
+
+      stage = "wait-download";
       const fileName = await waitForDownloadedCsv(downloadDir);
       const filePath = join(downloadDir, fileName);
+
+      stage = "read-download";
       const csv = await readFile(filePath, "utf8");
 
       if (!csv.trim()) {
         throw new Error("File export Gojek kosong.");
       }
 
+      stage = "handoff";
       const result = await handoffCsv(fileName, csv);
 
       lastRun = {
@@ -376,12 +389,13 @@ export async function syncNativeGojekDrivers() {
     const err = error as NodeJS.ErrnoException;
     const message = error instanceof Error ? error.message : String(error);
     const details = [
+      `stage=${stage}`,
       err.code ? `code=${err.code}` : null,
       err.path ? `path=${err.path}` : null,
       err.syscall ? `syscall=${err.syscall}` : null,
     ].filter(Boolean).join(" ");
 
-    const fullMessage = details ? `${message} [${details}]` : message;
+    const fullMessage = `${message} [${details}]`;
 
     lastRun = {
       startedAt,
