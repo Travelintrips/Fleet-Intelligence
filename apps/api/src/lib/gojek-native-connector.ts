@@ -48,7 +48,21 @@ function getBrowserRuntime() {
 }
 
 function getPreparedExecutablePath() {
-  return resolve(import.meta.dirname, "chromium-runtime", "chromium");
+  // A server-managed Chromium can be used when the hosting environment does not
+  // support the portable build-time binary. Never look for a browser on a client PC.
+  const configured = String(process.env.GOJEK_CHROMIUM_EXECUTABLE_PATH ?? "").trim();
+  return configured || resolve(import.meta.dirname, "chromium-runtime", "chromium");
+}
+
+function describeLaunchFailure(error: unknown): string {
+  if (error instanceof Error) {
+    const underlying = (error as Error & { cause?: unknown }).cause;
+    return [error.message, underlying ? describeLaunchFailure(underlying) : ""]
+      .filter(Boolean).join(" | cause: ");
+  }
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error) || "Unknown Chromium launch failure"; }
+  catch { return String(error); }
 }
 
 function getConfig() {
@@ -274,7 +288,7 @@ export async function getNativeGojekConnectorHealth() {
       }
     }
     if (!browserReady && !error) {
-      error = `Prepared Chromium belum tersedia atau tidak executable: ${executable}`;
+      error = `Chromium server belum tersedia atau tidak executable: ${executable}. Periksa build artifact atau GOJEK_CHROMIUM_EXECUTABLE_PATH.`;
     }
   }
 
@@ -413,7 +427,7 @@ export async function syncNativeGojekDrivers() {
     }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = describeLaunchFailure(error);
     const details = [
       `stage=${stage}`,
       err.code ? `code=${err.code}` : null,
