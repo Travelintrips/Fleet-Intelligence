@@ -2532,11 +2532,18 @@ router.get("/alerts", async (req: AdminRequest, res) => {
     const offset = (page - 1) * limit;
     const [rows, unread] = await Promise.all([
       pool.query(
-        `SELECT a.*, d.full_name AS driver_name
+        `SELECT a.*, d.full_name AS driver_name,
+                 (a.is_notified OR COALESCE(o.is_notified,false)) AS is_notified,
+                 COALESCE(o.last_wa_sent_at,a.notified_at) AS notified_at
            FROM public.fleet_alerts a
            LEFT JOIN public.fleet_drivers d
              ON d.id=a.driver_id
             AND d.company_id=a.company_id::text
+           LEFT JOIN public.fleet_outstanding o
+             ON a.alert_type='outstanding_high'
+            AND a.reference_type='fleet_outstanding'
+            AND a.reference_id=o.id::text
+            AND a.company_id=o.company_id
           WHERE a.company_id=$1
             AND a.auto_resolved_at IS NULL
             AND ($2='' OR a.is_read=$2::boolean)
