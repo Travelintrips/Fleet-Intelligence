@@ -118,7 +118,7 @@ function reminderMessage(row: ReminderRow): string {
     "",
     "Terima kasih.",
     "PT Diva Servis",
-  ].filter(Boolean).join("\\n");
+  ].filter(Boolean).join("\n");
 }
 
 export async function sendFleetOutstandingReminders(args: {
