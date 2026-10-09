@@ -90,7 +90,7 @@ function isActivePrivilegedUser(user: RawUser | null): user is RawUser {
   if (!user) return false;
   const role = user.role.trim().toLowerCase();
   return Boolean(
-    (role === "admin" || role === "owner")
+    (role === "admin" || role === "owner" || role === "super_admin")
     && user.isActive
     && (user.status === null || user.status.trim().toLowerCase() === "active"),
   );
@@ -582,7 +582,7 @@ router.post("/auth/email-otp/verify", async (
     const localUser = await getProductionUser(session);
     if (
       !localUser
-      || !["admin", "owner"].includes(localUser.role.trim().toLowerCase())
+      || !["admin", "owner", "super_admin"].includes(localUser.role.trim().toLowerCase())
     ) {
       response.status(400).json({ error: "Email atau kode OTP tidak dapat digunakan." });
       return;
