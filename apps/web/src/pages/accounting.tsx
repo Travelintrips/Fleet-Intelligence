@@ -57,16 +57,16 @@ export default function FleetAccountingPage() {
   const [genForm, setGenForm] = useState({
     periodStart: "",
     periodEnd: "",
-    ppnRate: "11",
     notes: "",
   });
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["fleet-accounting-journals", statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "100" });
       if (statusFilter !== "all") params.set("status", statusFilter);
       const res = await fetch(`/api/logistics/fleet/accounting/journals?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`Gagal mengambil jurnal (HTTP ${res.status})`);
       return res.json() as Promise<{ journals: Journal[]; total: number }>;
     },
   });
@@ -87,7 +87,7 @@ export default function FleetAccountingPage() {
       return res.json();
     },
     onSuccess: () => {
-      toast.success("Jurnal akuntansi berhasil di-generate");
+      toast.success("Draft dibuat; menunggu validasi COA dan debit-kredit");
       setShowGenForm(false);
       qc.invalidateQueries({ queryKey: ["fleet-accounting-journals"] });
     },
@@ -192,7 +192,7 @@ export default function FleetAccountingPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-slate-400 text-sm">
-                Sistem akan mengagregasi semua transaksi di periode yang dipilih dan membuat jurnal akuntansi (Debit AR/Bank, Kredit Revenue, PPN Keluaran, dll).
+                Sistem membuat draft ringkasan dari transaksi aktual. PPN mengikuti data sumber, bukan otomatis dihitung dari gross. Draft belum dapat disetujui atau diposting sebelum validasi COA dan keseimbangan debit-kredit.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="space-y-1.5">
@@ -202,18 +202,6 @@ export default function FleetAccountingPage() {
                 <div className="space-y-1.5">
                   <Label className="text-slate-300 text-sm">Periode Akhir *</Label>
                   <DatePicker value={genForm.periodEnd} onChange={(v) => setGenForm((f) => ({ ...f, periodEnd: v }))} className="bg-slate-700 border-slate-600 text-white" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-slate-300 text-sm">PPN Rate (%)</Label>
-                  <Input
-                    type="number"
-                    value={genForm.ppnRate}
-                    min="0"
-                    max="20"
-                    step="0.5"
-                    onChange={(e) => setGenForm((f) => ({ ...f, ppnRate: e.target.value }))}
-                    className="bg-slate-700 border-slate-600 text-white"
-                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-slate-300 text-sm">Catatan</Label>
@@ -264,7 +252,7 @@ export default function FleetAccountingPage() {
 
         {/* Journals list */}
         <div className="space-y-3">
-          {isLoading
+          {isError ? <p className="text-red-300">Gagal mengambil jurnal: {error instanceof Error ? error.message : "Kesalahan tidak diketahui"}</p> : isLoading
             ? Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-20 bg-slate-800/60 border border-slate-700 rounded-xl animate-pulse" />
               ))
@@ -308,7 +296,7 @@ export default function FleetAccountingPage() {
                                 size="sm"
                                 className="h-8 bg-blue-600 hover:bg-blue-700 gap-1.5 text-xs"
                                 onClick={(e) => { e.stopPropagation(); approveMutation.mutate(j.id); }}
-                                disabled={approveMutation.isPending}
+                                disabled={approveMutation.isPending || (j as Journal & {raw_stats?: {accountingReviewRequired?: boolean}}).raw_stats?.accountingReviewRequired === true}
                               >
                                 <CheckCircle className="w-3.5 h-3.5" /> Approve
                               </Button>
@@ -347,25 +335,8 @@ export default function FleetAccountingPage() {
                             ))}
                           </div>
 
-                          {/* Accounting entries table */}
-                          <div className="bg-slate-900/40 rounded-lg p-3 text-xs font-mono space-y-1">
-                            <p className="text-slate-400 font-sans font-medium mb-2">Entri Jurnal (Preview)</p>
-                            <div className="grid grid-cols-3 gap-2 text-slate-500 border-b border-slate-700 pb-1 mb-1">
-                              <span>Akun</span><span className="text-right">Debit</span><span className="text-right">Kredit</span>
-                            </div>
-                            {[
-                              { account: "Kas / Accounts Receivable", debit: fmtIdr(j.gross_revenue), credit: "" },
-                              { account: `  ↳ ${j.outstanding_amount && Number(j.outstanding_amount) > 0 ? "AR" : "Kas/Bank"} (${j.outstanding_amount && Number(j.outstanding_amount) > 0 ? "Outstanding" : "Langsung"})`, debit: "", credit: "" },
-                              { account: "Fleet Revenue", debit: "", credit: fmtIdr(j.net_revenue) },
-                              { account: `PPN Keluaran (${j.ppn_rate}%)`, debit: "", credit: fmtIdr(j.ppn_amount) },
-                              { account: "Driver Payout / Cost of Service", debit: fmtIdr(j.driver_payout), credit: "" },
-                            ].map((e, i) => (
-                              <div key={i} className="grid grid-cols-3 gap-2">
-                                <span className="text-slate-300">{e.account}</span>
-                                <span className="text-right text-emerald-400">{e.debit}</span>
-                                <span className="text-right text-red-400">{e.credit}</span>
-                              </div>
-                            ))}
+                          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200">
+                            Draft ringkasan transaksi, bukan jurnal debit-kredit siap posting. COA, perlakuan pajak, serta keseimbangan jurnal harus diverifikasi lebih dulu.
                           </div>
 
                           {/* Audit info */}
