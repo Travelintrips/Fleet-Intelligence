@@ -34,7 +34,6 @@ const tick = async () => {
   } catch (error) {
     logger.error({ error }, "Fleet background sweep failed");
   } finally {
-    await runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
     running = false;
   }
 };
@@ -43,7 +42,12 @@ const timer = setInterval(() => void tick(), 5 * 60 * 1000);
 timer.unref();
 setTimeout(() => void tick(), 20_000).unref();
 
-const stop = () => clearInterval(timer);
+const runGroupReport = () => void runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
+const reportTimer = setInterval(runGroupReport, 5 * 60 * 1000);
+reportTimer.unref();
+setTimeout(runGroupReport, 35_000).unref();
+
+const stop = () => { clearInterval(timer); clearInterval(reportTimer); };
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 server.on("error", (error) => {
