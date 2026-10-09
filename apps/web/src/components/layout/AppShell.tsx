@@ -14,6 +14,7 @@ import {
   WalletCards,
   MessageCircle,
   Link2,
+  LogOut,
 } from "lucide-react";
 
 const NAV = [
@@ -103,9 +104,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/[0.055] px-3 py-1.5 text-[11px] font-medium text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_9px_rgba(52,211,153,.8)]" />
-              Production
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/[0.055] px-3 py-1.5 text-[11px] font-medium text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_9px_rgba(52,211,153,.8)]" />
+                Production
+              </div>
+              <a
+                href="/api/logout?redirect=/logistics/fleet-intelligence"
+                aria-label="Keluar dari CST Fleet"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-rose-400/30 hover:bg-rose-500/10 hover:text-rose-200"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Log Out</span>
+              </a>
             </div>
           </div>
 
