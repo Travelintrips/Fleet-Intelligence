@@ -257,7 +257,12 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
       ? new Date(row.auto_blast_last_run).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
       : null;
 
-    if (hourWib < configuredHour || lastRunDate === dateWib) continue;
+    // One-time catch-up on 9 Oct at 16:00 WIB; normal 08:00 resumes tomorrow.
+    const catchup = dateWib === "2026-10-09" && hourWib >= 16;
+    const lastRunHour = row.auto_blast_last_run
+      ? Number(new Intl.DateTimeFormat("en-GB", {timeZone:"Asia/Jakarta",hour:"2-digit",hourCycle:"h23"}).format(new Date(row.auto_blast_last_run)))
+      : -1;
+    if (hourWib < configuredHour || (lastRunDate === dateWib && (!catchup || lastRunHour >= 16))) continue;
 
     const lastAttemptMs = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : 0;
     const retryBackoffMs = 30 * 60 * 1000;
@@ -310,9 +315,10 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
           AND (
             auto_blast_last_run IS NULL
             OR (auto_blast_last_run AT TIME ZONE 'Asia/Jakarta')::date < (NOW() AT TIME ZONE 'Asia/Jakarta')::date
+            OR ($2::boolean AND (auto_blast_last_run AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date AND EXTRACT(HOUR FROM auto_blast_last_run AT TIME ZONE 'Asia/Jakarta') < 16)
           )
         RETURNING company_id`,
-      [companyId],
+      [companyId, catchup],
     );
     if (!claimed.rowCount) continue;
 
