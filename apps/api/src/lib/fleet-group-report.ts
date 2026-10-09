@@ -16,6 +16,18 @@ async function sendReport(text: string, key: string) {
   const url = String(process.env.CST_WA_GATEWAY_URL ?? process.env.WA_GATEWAY_URL ?? "").replace(/\/$/, "");
   const token = String(process.env.CST_WA_GATEWAY_TOKEN ?? process.env.WA_GATEWAY_TOKEN ?? "");
   if (!url || !token) return false;
+  const groupResponse = await fetch(url + "/v1/groups", {
+    headers: { Authorization: "Bearer " + token },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!groupResponse.ok) {
+    throw new Error("WA Gateway groups lookup HTTP " + groupResponse.status + "; token must have groups:read");
+  }
+  const registry = await groupResponse.json() as { groups?: Array<{id?: string;jid?: string;isActive?: boolean;deviceId?: string}> };
+  const group = (registry.groups ?? []).find(item => item.jid === to && item.isActive !== false);
+  if (!group?.id) {
+    throw new Error("Group " + to + " not found in WA Gateway assigned groups; sync groups and verify device membership");
+  }
   const response = await fetch(url + "/v1/messages", {
     method: "POST",
     headers: {
@@ -23,7 +35,7 @@ async function sendReport(text: string, key: string) {
       "Content-Type": "application/json",
       "Idempotency-Key": key,
     },
-    body: JSON.stringify({ type: "text", to, text, deviceId: status.deviceId }),
+    body: JSON.stringify({ type: "text", groupId: group.id, text }),
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) {
