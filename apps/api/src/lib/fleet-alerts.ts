@@ -57,7 +57,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
      FROM public.fleet_outstanding o
      WHERE o.company_id=$1
        AND o.status='open'
-       AND o.outstanding_amount >= 500000
+       AND o.outstanding_amount >= 50000
      ON CONFLICT (company_id, alert_type, reference_type, reference_id)
        WHERE auto_resolved_at IS NULL
          AND reference_type IS NOT NULL
@@ -80,7 +80,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
     }>(
       `SELECT id,driver_name,vehicle_plate,outstanding_amount,driver_id
          FROM public.fleet_outstanding
-        WHERE company_id=$1 AND status='open' AND outstanding_amount >= 500000`,
+        WHERE company_id=$1 AND status='open' AND outstanding_amount >= 50000`,
       [companyId],
     );
     let count = 0;
@@ -119,7 +119,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
            WHERE o.company_id=a.company_id
              AND o.id::text=a.reference_id
              AND o.status='open'
-             AND o.outstanding_amount >= 500000
+             AND o.outstanding_amount >= 50000
         )`,
     [companyId],
   );
