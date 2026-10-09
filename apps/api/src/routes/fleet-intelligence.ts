@@ -335,12 +335,27 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
           actor: `gojek-vps-worker:${auth.workerId}`,
         });
 
+    // Optional read-only Overview data captured from the authenticated Gojek page.
+    // Keep overview independent of driver/transaction accounting and never infer
+    // company profit from Gojek's "Total net earnings" label.
+    const overviewInput = req.body?.overview;
+    let overview: { netEarnings: number; periodStart: string; periodEnd: string; capturedAt: string } | null = null;
+    if (exportType === "driver_snapshot" && overviewInput && typeof overviewInput === "object") {
+      const amount = Number(overviewInput.netEarnings);
+      const from = String(overviewInput.periodStart ?? "");
+      const to = String(overviewInput.periodEnd ?? "");
+      if (Number.isFinite(amount) && amount >= 0 && amount <= 1e13 &&
+          /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) &&
+          from <= to && Date.parse(to) - Date.parse(from) <= 366 * 86400000) {
+        overview = { netEarnings: amount, periodStart: from, periodEnd: to, capturedAt: new Date().toISOString() };
+      }
+    }
     await pool.query(
       `UPDATE public.fleet_gojek_sync_jobs
           SET status='succeeded',finished_at=NOW(),heartbeat_at=NOW(),
               result=$2::jsonb,error=NULL,updated_at=NOW()
         WHERE id=$1`,
-      [jobId, JSON.stringify({ exportType, ...result })],
+      [jobId, JSON.stringify({ exportType, ...result, ...(overview ? { overview } : {}) })],
     );
     await pool.query(
       `UPDATE public.fleet_gojek_connector_workers
@@ -1083,6 +1098,19 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       }
     }
 
+    // Latest verified snapshot of the official Gojek Overview (its own date range).
+    // Not derived from driver rental payments or transaction exports.
+    const overviewRow = await pool.query<{ overview: unknown }>(
+      `SELECT result->'overview' AS overview
+         FROM public.fleet_gojek_sync_jobs
+        WHERE company_id=$1 AND status='succeeded'
+          AND result->>'exportType'='driver_snapshot'
+          AND result->'overview' IS NOT NULL
+        ORDER BY finished_at DESC LIMIT 1`,
+      [cid],
+    );
+    const gojekOverview = overviewRow.rows[0]?.overview ?? null;
+
     const importDate = await pool.query<{ uploaded_at: Date }>(
       `SELECT uploaded_at
          FROM public.fleet_outstanding_import_log
@@ -1099,6 +1127,7 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       topDrivers: topDrivers.rows,
       outstanding: outstanding.rows[0] ?? { count: 0, total_amount: 0 },
       rawTotals,
+      gojekOverview,
       snapshotSummary,
       outstandingReconciliation: { comparable: false, authoritativeSource: "gojek_driver_snapshot", transactionScope: "partial_history", mismatch: false },
       dataSource: normalizedTransactionRows > 0

@@ -52,6 +52,7 @@ type DashboardData = {
   topDrivers: Array<Record<string, unknown>>;
   outstanding: Record<string, unknown>;
   rawTotals: Record<string, unknown>;
+  gojekOverview?: { netEarnings: number; periodStart: string; periodEnd: string; capturedAt: string } | null;
   snapshotSummary?: Record<string, unknown>;
   dataSource?: "normalized_transactions" | "raw_transactions" | "driver_snapshot";
   dataQuality?: {
@@ -177,6 +178,7 @@ export default function FleetIntelligenceDashboard() {
   const topDrivers = data?.topDrivers ?? [];
   const outstandingSummary = data?.outstanding ?? {};
   const rawTotals = data?.rawTotals ?? {};
+  const gojekOverview = data?.gojekOverview ?? null;
   const snapshotSummary = data?.snapshotSummary ?? {};
   const dataSource = data?.dataSource ?? "driver_snapshot";
   const dataQuality = data?.dataQuality ?? {};
@@ -372,6 +374,29 @@ export default function FleetIntelligenceDashboard() {
             </CardContent>
           </Card>
         )}
+
+        {/* Official Gojek Overview metric: distinct from vehicle rental fees. */}
+        <Card className="border-sky-800/50 bg-sky-950/20">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="text-sm text-slate-300">Total Pendapatan Gojek (Net Earnings)</div>
+                <div className="text-2xl font-bold text-sky-300 mt-1">
+                  {gojekOverview ? fmtIdr(gojekOverview.netEarnings) : "Belum tersinkronisasi"}
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {gojekOverview
+                    ? `Periode Gojek: ${gojekOverview.periodStart} s.d. ${gojekOverview.periodEnd} · diperbarui ${new Date(gojekOverview.capturedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB`
+                    : "Nilai diambil dari halaman Overview pada sinkronisasi driver Gojek berikutnya."}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Angka Overview Gojek, bukan Rental Fee dan belum diklasifikasikan sebagai laba bersih perusahaan.
+                </div>
+              </div>
+              <Badge className="bg-slate-800 text-slate-300 border-slate-700">Overview Gojek</Badge>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Outstanding KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
