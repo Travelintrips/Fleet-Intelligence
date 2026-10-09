@@ -34,7 +34,14 @@ async function sendReport(text: string, key: string) {
 }
 
 export async function runFleetGroupReportSweep() {
-  if (process.env.NODE_ENV !== "production" || !groupId()) return;
+  if (process.env.NODE_ENV !== "production") return;
+  if (!groupId()) {
+    await pool.query(
+      "INSERT INTO public.fleet_group_report_log(report_key,status,error) VALUES($1,$2,$3) ON CONFLICT (report_key) DO UPDATE SET error=EXCLUDED.error,status=EXCLUDED.status,updated_at=NOW()",
+      ["config:" + jakartaDate(new Date()), "failed", "ADMIN_WA_GROUP belum tersedia atau bukan Group ID @g.us pada runtime CST Fleet."],
+    );
+    return;
+  }
   const today = jakartaDate(new Date());
   const client = await pool.connect();
   try {
