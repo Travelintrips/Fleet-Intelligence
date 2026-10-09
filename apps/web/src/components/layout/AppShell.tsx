@@ -52,8 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileMenuOpen && (
         <button aria-label="Tutup menu navigasi" className="fixed inset-0 z-40 bg-black/65 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
       )}
-      <aside className={"fixed inset-y-0 left-0 z-50 w-[min(290px,85vw)] border-r border-white/[0.07] bg-slate-950 px-3 py-4 backdrop-blur-2xl transition-transform duration-200 lg:z-40 lg:w-[248px] lg:translate-x-0 " + (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")} 
- border-r border-white/[0.07] bg-slate-950/78 px-3 py-4 backdrop-blur-2xl lg:block">
+      <aside className={"fixed inset-y-0 left-0 z-50 w-[min(290px,85vw)] border-r border-white/[0.07] bg-slate-950 px-3 py-4 backdrop-blur-2xl transition-transform duration-200 lg:z-40 lg:w-[248px] lg:translate-x-0 " + (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="mb-7 flex items-center gap-3 px-3">
           <button aria-label="Tutup navigasi" className="ml-auto order-last rounded-lg p-2 text-slate-300 lg:hidden" onClick={() => setMobileMenuOpen(false)}><X className="h-5 w-5" /></button>
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/25 to-cyan-400/10 shadow-lg shadow-indigo-950/30">
