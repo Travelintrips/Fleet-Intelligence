@@ -164,3 +164,27 @@ body {
   .fleet-page { padding-bottom: 1rem; }
   .fleet-page h1 { font-size: 1.65rem; }
 }
+
+/* Responsive protection shared by every Fleet page without altering business logic. */
+.fleet-page, .fleet-page > div, .fleet-page section, .fleet-page [data-slot="card"] {
+  min-width: 0;
+}
+.fleet-page img, .fleet-page svg.recharts-surface { max-width: 100%; }
+.fleet-page .recharts-responsive-container { min-width: 0; }
+@media (max-width: 767px) {
+  .fleet-page { overflow-wrap: anywhere; }
+  .fleet-page h1 { font-size: clamp(1.3rem, 5vw, 1.65rem); line-height: 1.25; }
+  .fleet-page h2 { line-height: 1.3; }
+  .fleet-page [class*="grid-cols-4"],
+  .fleet-page [class*="grid-cols-5"],
+  .fleet-page [class*="grid-cols-6"] { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+  .fleet-page [data-slot="card-content"],
+  .fleet-page [data-slot="card-header"] { min-width: 0; }
+  .fleet-page :is(input, select, textarea) { max-width: 100%; }
+  .fleet-page table { min-width: max-content; }
+  .fleet-page :is([class*="overflow-x-auto"], [class*="overflow-auto"]) { max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .fleet-page button, .fleet-page a { touch-action: manipulation; }
+}
+@media (max-width: 390px) {
+  .fleet-page [data-slot="card-content"] { padding-left: .8rem; padding-right: .8rem; }
+}
