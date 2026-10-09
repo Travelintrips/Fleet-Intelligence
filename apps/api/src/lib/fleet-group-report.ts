@@ -98,34 +98,6 @@ export async function runFleetGroupReportSweep() {
           "\nCatatan: status sent adalah penerimaan oleh WA Gateway, bukan bukti dibaca."
       });
     }
-    // Copies are generated only for messages already accepted by the driver gateway.
-    // Group delivery must never trigger or retry the driver's original message.
-    const driverMessages = await client.query<{
-      id:number;driver_name:string;vehicle_plate:string|null;
-      outstanding_amount:string|number;sent_at:Date;send_type:string;
-    }>(`
-      SELECT id,driver_name,vehicle_plate,outstanding_amount,sent_at,send_type
-      FROM public.fleet_wa_logs
-      WHERE status='sent'
-        AND outstanding_amount >= 50000
-        AND (sent_at AT TIME ZONE 'Asia/Jakarta')::date =
-            (NOW() AT TIME ZONE 'Asia/Jakarta')::date
-      ORDER BY sent_at ASC
-    `);
-    for (const entry of driverMessages.rows) {
-      const amount = Number(entry.outstanding_amount);
-      if (!Number.isFinite(amount) || amount < 50000) continue;
-      reports.push({
-        key: "driver-copy:" + entry.id,
-        message: "CST Fleet | Pengingat Outstanding Driver\n" +
-          "Driver: " + entry.driver_name +
-          "\nKendaraan: " + (entry.vehicle_plate || "-") +
-          "\nOutstanding: Rp" + new Intl.NumberFormat("id-ID").format(amount) +
-          "\nWaktu: " + new Date(entry.sent_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"}) + " WIB" +
-          "\nStatus: Diterima WA Gateway" +
-          "\nTipe: " + entry.send_type,
-      });
-    }
     for (const report of reports) {
       const claim = await client.query<{report_key:string}>(`
         INSERT INTO public.fleet_group_report_log(report_key,status)
