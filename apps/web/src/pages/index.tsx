@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Users, DollarSign, AlertTriangle, RefreshCw,
-  Wrench, Search, ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown,
+  Search, ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown,
   MessageCircle, CheckCircle, Send, RotateCcw, Database, Clock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -153,24 +153,6 @@ export default function FleetIntelligenceDashboard() {
     },
   });
 
-  const repairMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/logistics/fleet/outstanding/repair", {
-        method: "POST", credentials: "include",
-      });
-      if (!res.ok) throw new Error("Gagal perbaiki outstanding");
-      return res.json() as Promise<{ ok: boolean; summary: Record<string, unknown> }>;
-    },
-    onSuccess: (d) => {
-      toast.success(`Outstanding diperbarui: ${fmtIdr(d.summary?.total)} (${fmtNum(d.summary?.drivers)} driver)`);
-      qc.invalidateQueries({ queryKey: ["fleet-dashboard"] });
-      qc.invalidateQueries({ queryKey: ["fleet-outstanding-index"] });
-      refetch();
-      ostRefetch();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
   const waBlastMutation = useMutation({
     mutationFn: async (ids: number[]) => {
       const res = await fetch("/api/logistics/fleet/outstanding/wa-blast", {
@@ -210,7 +192,7 @@ export default function FleetIntelligenceDashboard() {
     : null;
   const rawOutstanding = parseFloat(String(rawTotals.raw_outstanding_total ?? 0));
   const tableOutstanding = parseFloat(String(outstandingSummary?.total_amount ?? 0));
-  const outstandingStale = rawOutstanding > 0 && Math.abs(rawOutstanding - tableOutstanding) / rawOutstanding > 0.01;
+  // Raw transaction balances are incomplete, not comparable to official driver snapshots.
   const statusChartData = [
     { label: "Aktif", value: Number(snapshotSummary.active_drivers ?? 0) },
     { label: "Tidak Aktif", value: Number(snapshotSummary.inactive_drivers ?? 0) },
@@ -368,15 +350,11 @@ export default function FleetIntelligenceDashboard() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline" size="sm"
-              className="gap-2 border-amber-600 text-amber-400 hover:bg-amber-900/20"
-              disabled={repairMutation.isPending}
-              onClick={() => repairMutation.mutate()}
-            >
-              <Wrench className="w-4 h-4" />
-              {repairMutation.isPending ? "Menghitung..." : "Perbaiki Outstanding"}
-            </Button>
+            <Link href="/logistics/fleet-intelligence/gojek-connector">
+              <Button variant="outline" size="sm" className="gap-2 border-amber-600 text-amber-400 hover:bg-amber-900/20">
+                Sinkronisasi Gojek
+              </Button>
+            </Link>
             <Button variant="outline" size="sm" onClick={() => { refetch(); ostRefetch(); }} className="gap-2">
               <RefreshCw className="w-4 h-4" /> Refresh
             </Button>
@@ -449,55 +427,32 @@ export default function FleetIntelligenceDashboard() {
           </Link>
         </div>
 
-        {/* Outstanding Alert */}
+        {/* Transaction reconciliation is partial and must not be treated as authoritative debt. */}
         {rawOutstanding > 0 && (
-          <Card className={`border ${outstandingStale ? "bg-red-900/20 border-red-700/40" : "bg-amber-900/20 border-amber-700/40"}`}>
+          <Card className="bg-slate-800/50 border-slate-700">
             <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
-                <AlertTriangle className={`w-5 h-5 ${outstandingStale ? "text-red-400" : "text-amber-400"}`} />
+                <Database className="w-5 h-5 text-sky-400" />
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`font-medium ${outstandingStale ? "text-red-300" : "text-amber-300"}`}>
-                      Outstanding Belum Lunas:{" "}
-                    </span>
-                    <span className="text-white font-bold">{fmtIdr(rawOutstanding)}</span>
-                    <span className="text-slate-400 text-sm">
-                      ({fmtNum(outstandingSummary.count)} driver)
-                    </span>
-                    <Badge className="bg-slate-700 text-slate-300 border-slate-600 text-xs">
-                      <Database className="w-3 h-3 mr-1" />
-                      dari raw CSV
-                    </Badge>
-                    <Badge className="bg-blue-900/50 text-blue-300 border-blue-700/50 text-xs">
-                      <Clock className="w-3 h-3 mr-1" />
-                      All-time
+                    <span className="font-medium text-slate-200">Total Sisa Tagihan (Snapshot Gojek):</span>
+                    <span className="text-white font-bold">{fmtIdr(tableOutstanding)}</span>
+                    <span className="text-slate-400 text-sm">({fmtNum(outstandingSummary.count)} driver)</span>
+                    <Badge className="bg-emerald-900/40 text-emerald-300 border-emerald-700/40 text-xs">
+                      Sumber resmi
                     </Badge>
                   </div>
-                  {outstandingStale && (
-                    <p className="text-red-300 text-xs mt-1">
-                      ⚠ Data tabel berbeda dengan CSV ({fmtIdr(tableOutstanding)}) — klik "Perbaiki Outstanding"
-                    </p>
-                  )}
+                  <p className="text-slate-400 text-xs mt-1">
+                    Data transaksi mencakup sebagian riwayat driver, sehingga tidak digunakan untuk mengganti saldo outstanding.
+                    Sinkronisasi driver Gojek memperbarui saldo resmi.
+                  </p>
                 </div>
               </div>
-              <div className="flex gap-2">
-                {outstandingStale && (
-                  <Button
-                    size="sm"
-                    className="bg-red-700 hover:bg-red-600 gap-1.5"
-                    disabled={repairMutation.isPending}
-                    onClick={() => repairMutation.mutate()}
-                  >
-                    <Wrench className="w-3.5 h-3.5" />
-                    {repairMutation.isPending ? "Memperbaiki..." : "Perbaiki Sekarang"}
-                  </Button>
-                )}
-                <Link href="/logistics/fleet-intelligence/outstanding">
-                  <Button variant="outline" size="sm" className="border-amber-600 text-amber-400 hover:bg-amber-900/30">
-                    Lihat Detail
-                  </Button>
-                </Link>
-              </div>
+              <Link href="/logistics/fleet-intelligence/outstanding">
+                <Button variant="outline" size="sm" className="border-slate-600 text-slate-200">
+                  Lihat Detail
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         )}
