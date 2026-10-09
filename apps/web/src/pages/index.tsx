@@ -269,7 +269,7 @@ export default function FleetIntelligenceDashboard() {
     const rows = ostData?.outstanding ?? [];
     const highCount = rows.filter((r) => parseFloat(String(r.outstanding_amount ?? 0)) >= 1_000_000).length;
     const totalOutstanding = rows.reduce((s, r) => s + (parseFloat(String(r.outstanding_amount ?? 0)) || 0), 0);
-    const allDriverCount = rows.length;
+    const allDriverCount = rows.filter((r) => r.status === "open" && Number(r.outstanding_amount ?? 0) > 0).length;
     const q = search.toLowerCase();
     let filtered = q
       ? rows.filter((r) =>
