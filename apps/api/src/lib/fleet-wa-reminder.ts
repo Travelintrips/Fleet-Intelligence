@@ -125,7 +125,7 @@ export async function sendFleetOutstandingReminders(args: {
   const ids = Array.isArray(args.ids) ? args.ids.filter((id) => Number.isSafeInteger(id) && id > 0) : [];
   const minOutstanding = Math.max(50_000, Number(args.minOutstanding) || 0);
 
-  const params: unknown[] = [companyId, suppressHours, minOutstanding];
+  const params: unknown[] = [companyId, minOutstanding];
   let idFilter = "";
   if (ids.length) {
     params.push(ids);
@@ -151,7 +151,7 @@ export async function sendFleetOutstandingReminders(args: {
         AND d.company_id=o.company_id::text
       WHERE o.company_id=$1
         AND o.status='open'
-        AND o.outstanding_amount >= $3
+        AND o.outstanding_amount >= $2
         AND d.status IN ('active','inactive','suspended')
         AND COALESCE(d.source_present_in_latest_snapshot,true)=true
         ${idFilter}
