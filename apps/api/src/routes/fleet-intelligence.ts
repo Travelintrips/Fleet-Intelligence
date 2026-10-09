@@ -345,7 +345,7 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
       const from = String(overviewInput.periodStart ?? "");
       const to = String(overviewInput.periodEnd ?? "");
       if (Number.isFinite(amount) && amount >= 0 && amount <= 1e13 &&
-          /^\\d{4}-\\d{2}-\\d{2}$/.test(from) && /^\\d{4}-\\d{2}-\\d{2}$/.test(to) &&
+          /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) &&
           from <= to && Date.parse(to) - Date.parse(from) <= 366 * 86400000) {
         overview = { netEarnings: amount, periodStart: from, periodEnd: to, capturedAt: new Date().toISOString() };
       }
