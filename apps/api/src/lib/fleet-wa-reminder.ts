@@ -143,7 +143,7 @@ export async function sendFleetOutstandingReminders(args: {
                WHERE l.company_id=o.company_id
                  AND l.outstanding_id=o.id
                  AND l.status='sent'
-                 AND l.sent_at >= NOW() - ($2::int * interval '1 hour')
+                 AND (l.sent_at AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date
             ) AS suppressed
        FROM public.fleet_outstanding o
        JOIN public.fleet_drivers d
