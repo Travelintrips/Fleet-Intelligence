@@ -2520,7 +2520,11 @@ router.get("/alerts", async (req: AdminRequest, res) => {
       res.json({ alerts: [], unreadCount: 0 });
       return;
     }
-    await syncFleetAlertsForCompany(cid);
+    try {
+      await syncFleetAlertsForCompany(cid);
+    } catch (syncError) {
+      req.log.error({ error: syncError, companyId: cid }, "Fleet alert sweep failed; serving persisted alerts");
+    }
     const isRead = typeof req.query.isRead === "string" && req.query.isRead !== "all" ? req.query.isRead : "";
     const severity = typeof req.query.severity === "string" && req.query.severity !== "all" ? req.query.severity : "";
     const page = Math.max(Number(req.query.page) || 1, 1);
