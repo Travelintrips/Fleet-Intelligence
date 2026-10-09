@@ -117,13 +117,13 @@ export async function runFleetGroupReportSweep() {
       if (!Number.isFinite(amount) || amount < 50000) continue;
       reports.push({
         key: "driver-copy:" + entry.id,
-        message: "CST Fleet | Pengingat Outstanding Driver\\n" +
+        message: "CST Fleet | Pengingat Outstanding Driver\n" +
           "Driver: " + entry.driver_name +
-          "\\nKendaraan: " + (entry.vehicle_plate || "-") +
-          "\\nOutstanding: Rp" + new Intl.NumberFormat("id-ID").format(amount) +
-          "\\nWaktu: " + new Date(entry.sent_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"}) + " WIB" +
-          "\\nStatus: Diterima WA Gateway" +
-          "\\nTipe: " + entry.send_type,
+          "\nKendaraan: " + (entry.vehicle_plate || "-") +
+          "\nOutstanding: Rp" + new Intl.NumberFormat("id-ID").format(amount) +
+          "\nWaktu: " + new Date(entry.sent_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"}) + " WIB" +
+          "\nStatus: Diterima WA Gateway" +
+          "\nTipe: " + entry.send_type,
       });
     }
     for (const report of reports) {
