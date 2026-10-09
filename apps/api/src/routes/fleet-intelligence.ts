@@ -375,7 +375,7 @@ router.post("/gojek-connector/worker/fail", async (req, res) => {
       `UPDATE public.fleet_gojek_sync_jobs
           SET status='failed',finished_at=NOW(),heartbeat_at=NOW(),
               error=$3,updated_at=NOW()
-        WHERE id=$1 AND worker_id=$2`,
+        WHERE id=$1 AND worker_id=$2 AND status='running'`,
       [jobId, auth.workerId, errorText],
     );
     await pool.query(
@@ -657,6 +657,12 @@ async function importGojekConnectorCsv(args: {
   const client = await pool.connect();
 
   try {
+    // Transaction-scoped lock serializes imports of the same report hash.
+    // Prevent concurrent handoffs racing past dedup before either commits.
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text),hashtext($2::text))",[
+      "fleet-gojek-transactions:" + args.companyId, fileHash,
+    ]);
     const dup = await client.query(
       "SELECT id,original_filename,status FROM public.fleet_reports WHERE company_id=$1 AND file_hash=$2 ORDER BY id DESC LIMIT 1",
       [args.companyId, fileHash],
@@ -665,7 +671,6 @@ async function importGojekConnectorCsv(args: {
       throw new Error(`File export ini sudah pernah diproses (report #${dup.rows[0].id}).`);
     }
 
-    await client.query("BEGIN");
     const dates = parsed.rows.map((r) => r.txDate).filter(Boolean).sort();
     const report = await client.query<{ id: number }>(
       `INSERT INTO public.fleet_reports(
