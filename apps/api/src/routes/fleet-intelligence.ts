@@ -1100,6 +1100,7 @@ router.get("/dashboard", async (req: AdminRequest, res) => {
       outstanding: outstanding.rows[0] ?? { count: 0, total_amount: 0 },
       rawTotals,
       snapshotSummary,
+      outstandingReconciliation: { comparable: false, authoritativeSource: "gojek_driver_snapshot", transactionScope: "partial_history", mismatch: false },
       dataSource: normalizedTransactionRows > 0
         ? "normalized_transactions"
         : Number((rawTotals as Record<string, unknown>).raw_row_count ?? 0) > 0
@@ -1234,87 +1235,26 @@ router.get("/outstanding", async (req: AdminRequest, res) => {
 
 router.post("/outstanding/repair", async (req: AdminRequest, res) => {
   try {
-    await ensureFleetTables();
     const cid = companyId(req);
-    if (!(await tableExists("gojek_raw_transactions"))) {
-      const summary = await pool.query(
-        `SELECT COUNT(*)::int AS drivers, COALESCE(SUM(outstanding_amount),0)::numeric AS total
-           FROM public.fleet_outstanding WHERE company_id=$1 AND status='open'`,
-        [cid],
-      );
-      res.json({ ok: true, message: "Tidak ada raw Gojek; snapshot existing dipertahankan.", summary: summary.rows[0] });
-      return;
-    }
-
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const latest = await client.query<{
-        driver_external_id: string;
-        driver_name: string | null;
-        phone_number: string | null;
-        vehicle: string | null;
-        total_outstanding_balance: string | number;
-      }>(
-        `SELECT DISTINCT ON (driver_external_id)
-                driver_external_id, driver_name, phone_number, vehicle, total_outstanding_balance
-           FROM public.gojek_raw_transactions
-          WHERE company_id=$1
-            AND NULLIF(driver_external_id,'') IS NOT NULL
-            AND total_outstanding_balance IS NOT NULL
-          ORDER BY driver_external_id, date_iso DESC NULLS LAST, id DESC`,
-        [cid],
-      );
-
-      for (const row of latest.rows) {
-        const amount = numberValue(row.total_outstanding_balance);
-        if (amount <= 0) {
-          await client.query(
-            `UPDATE public.fleet_outstanding
-                SET status='resolved', resolved_at=NOW(), outstanding_amount=0, updated_at=NOW()
-              WHERE company_id=$1 AND driver_external_id=$2 AND status='open'`,
-            [cid, row.driver_external_id],
-          );
-          continue;
-        }
-        const updated = await client.query(
-          `UPDATE public.fleet_outstanding
-              SET driver_name=COALESCE(NULLIF($3,''),driver_name),
-                  driver_phone=COALESCE(NULLIF($4,''),driver_phone),
-                  vehicle_plate=COALESCE(NULLIF($5,''),vehicle_plate),
-                  outstanding_amount=$6,
-                  last_updated_date=CURRENT_DATE,
-                  updated_at=NOW()
-            WHERE company_id=$1 AND driver_external_id=$2 AND status='open'
-            RETURNING id`,
-          [cid, row.driver_external_id, row.driver_name ?? "", row.phone_number ?? "", row.vehicle ?? "", amount],
-        );
-        if (updated.rowCount === 0) {
-          await client.query(
-            `INSERT INTO public.fleet_outstanding
-              (company_id,driver_external_id,driver_name,driver_phone,vehicle_plate,outstanding_amount,last_updated_date,status,snapshot_source)
-             VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,'open','raw_repair')`,
-            [cid, row.driver_external_id, row.driver_name || row.driver_external_id, row.phone_number, row.vehicle, amount],
-          );
-        }
-      }
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-
+    // The driver snapshot is authoritative for cumulative outstanding.
+    // Reconciliation transaction exports cover only a subset of drivers and
+    // must never overwrite or resolve the snapshot-derived balances.
     const summary = await pool.query(
-      `SELECT COUNT(*)::int AS drivers, COALESCE(SUM(outstanding_amount),0)::numeric AS total
-         FROM public.fleet_outstanding WHERE company_id=$1 AND status='open'`,
+      `SELECT COUNT(*)::int AS drivers,
+              COALESCE(SUM(outstanding_amount),0)::numeric AS total
+         FROM public.fleet_outstanding
+        WHERE company_id=$1 AND status='open'`,
       [cid],
     );
-    res.json({ ok: true, message: "Outstanding dihitung ulang dari raw transactions.", summary: summary.rows[0] });
+    res.json({
+      ok: true,
+      repaired: false,
+      message: "Saldo outstanding resmi Gojek dipertahankan. Untuk memperbarui saldo, lakukan sinkronisasi driver Gojek.",
+      summary: summary.rows[0],
+    });
   } catch (error) {
-    req.log.error({ error }, "Fleet outstanding repair failed");
-    res.status(503).json({ error: "Gagal memperbaiki outstanding." });
+    req.log.error({ error }, "Fleet outstanding status failed");
+    res.status(503).json({ error: "Gagal memeriksa outstanding." });
   }
 });
 
