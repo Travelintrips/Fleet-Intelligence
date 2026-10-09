@@ -2102,6 +2102,21 @@ router.get("/transactions", async (req: AdminRequest, res) => {
       `SELECT *
          FROM public.fleet_transactions
         WHERE company_id=$1
+          AND EXISTS (
+            SELECT 1 FROM public.fleet_drivers d
+            WHERE d.company_id = fleet_transactions.company_id::text
+              AND d.status='active'
+              AND COALESCE(d.source_present_in_latest_snapshot,true)=true
+              AND (
+                (NULLIF(fleet_transactions.driver_external_id,'') IS NOT NULL
+                 AND d.driver_external_id=fleet_transactions.driver_external_id)
+                OR
+                (NULLIF(fleet_transactions.driver_external_id,'') IS NULL
+                 AND LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
+                 AND NULLIF(fleet_transactions.vehicle_plate,'') IS NOT NULL
+                 AND UPPER(TRIM(d.vehicle_plate))=UPPER(TRIM(fleet_transactions.vehicle_plate)))
+              )
+          )
           AND ($2::date IS NULL OR transaction_date >= $2::date)
           AND ($3::date IS NULL OR transaction_date <= $3::date)
           AND ($4='' OR COALESCE(driver_name,'') ILIKE '%' || $4 || '%' OR COALESCE(driver_external_id,'') ILIKE '%' || $4 || '%')
@@ -2117,6 +2132,21 @@ router.get("/transactions", async (req: AdminRequest, res) => {
               COALESCE(SUM(gross_revenue),0)::numeric AS total_gross
          FROM public.fleet_transactions
         WHERE company_id=$1
+          AND EXISTS (
+            SELECT 1 FROM public.fleet_drivers d
+            WHERE d.company_id = fleet_transactions.company_id::text
+              AND d.status='active'
+              AND COALESCE(d.source_present_in_latest_snapshot,true)=true
+              AND (
+                (NULLIF(fleet_transactions.driver_external_id,'') IS NOT NULL
+                 AND d.driver_external_id=fleet_transactions.driver_external_id)
+                OR
+                (NULLIF(fleet_transactions.driver_external_id,'') IS NULL
+                 AND LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
+                 AND NULLIF(fleet_transactions.vehicle_plate,'') IS NOT NULL
+                 AND UPPER(TRIM(d.vehicle_plate))=UPPER(TRIM(fleet_transactions.vehicle_plate)))
+              )
+          )
           AND ($2::date IS NULL OR transaction_date >= $2::date)
           AND ($3::date IS NULL OR transaction_date <= $3::date)
           AND ($4='' OR COALESCE(driver_name,'') ILIKE '%' || $4 || '%' OR COALESCE(driver_external_id,'') ILIKE '%' || $4 || '%')
