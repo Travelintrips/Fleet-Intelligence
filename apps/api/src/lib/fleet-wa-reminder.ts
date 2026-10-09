@@ -152,7 +152,7 @@ export async function sendFleetOutstandingReminders(args: {
       WHERE o.company_id=$1
         AND o.status='open'
         AND o.outstanding_amount >= $2
-        AND d.status IN ('active','inactive','suspended')
+        AND d.status='active'
         AND COALESCE(d.source_present_in_latest_snapshot,true)=true
         ${idFilter}
       ORDER BY o.outstanding_amount DESC,o.id`,
