@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { runFleetAutoReminderSweep } from "./lib/fleet-wa-reminder";
 import { runFleetAlertSweep } from "./lib/fleet-alerts";
 import { runFleetGojekScheduledSyncSweep } from "./lib/fleet-gojek-scheduler";
+import { runFleetGroupReportSweep } from "./lib/fleet-group-report";
 import { initializeProductionSessionSigning, isDevelopmentEnvironment } from "./routes/dev-auth";
 
 const port = Number(process.env.PORT || 8080);
@@ -30,6 +31,7 @@ const tick = async () => {
     ]);
     if (reminders.length) logger.info({ result: reminders }, "Fleet WA reminder sweep completed");
     if (alerts.length) logger.info({ result: alerts }, "Fleet alert sweep completed");
+    await runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
   } catch (error) {
     logger.error({ error }, "Fleet background sweep failed");
   } finally {
