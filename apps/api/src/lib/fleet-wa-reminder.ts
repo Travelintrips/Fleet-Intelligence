@@ -185,7 +185,7 @@ export async function sendFleetOutstandingReminders(args: {
       const provider = await sendFleetWa({
         phone,
         message,
-        idempotencyKey: `fleet-wa:${companyId}:${row.id}:${sendType}`,
+        idempotencyKey: `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
       });
       senderDevice = provider.senderDevice ?? senderDevice;
       deviceStatus = provider.deviceStatus ?? deviceStatus;
