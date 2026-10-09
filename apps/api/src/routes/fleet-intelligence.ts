@@ -2111,8 +2111,7 @@ router.get("/transactions", async (req: AdminRequest, res) => {
                 (NULLIF(fleet_transactions.driver_external_id,'') IS NOT NULL
                  AND d.driver_external_id=fleet_transactions.driver_external_id)
                 OR
-                (NULLIF(fleet_transactions.driver_external_id,'') IS NULL
-                 AND LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
+                (LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
                  AND NULLIF(fleet_transactions.vehicle_plate,'') IS NOT NULL
                  AND UPPER(TRIM(d.vehicle_plate))=UPPER(TRIM(fleet_transactions.vehicle_plate)))
               )
@@ -2141,8 +2140,7 @@ router.get("/transactions", async (req: AdminRequest, res) => {
                 (NULLIF(fleet_transactions.driver_external_id,'') IS NOT NULL
                  AND d.driver_external_id=fleet_transactions.driver_external_id)
                 OR
-                (NULLIF(fleet_transactions.driver_external_id,'') IS NULL
-                 AND LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
+                (LOWER(TRIM(d.full_name))=LOWER(TRIM(fleet_transactions.driver_name))
                  AND NULLIF(fleet_transactions.vehicle_plate,'') IS NOT NULL
                  AND UPPER(TRIM(d.vehicle_plate))=UPPER(TRIM(fleet_transactions.vehicle_plate)))
               )
