@@ -30,17 +30,18 @@ function fmtDate(v: unknown) {
 
 export default function FleetAlertsPage() {
   const qc = useQueryClient();
-  const [isRead, setIsRead] = useState("false");
+  const [isRead, setIsRead] = useState("all");
   const [severity, setSeverity] = useState("all");
   const [page, setPage] = useState(1);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["fleet-alerts", isRead, severity, page],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "50" });
       if (isRead !== "all") params.set("isRead", isRead);
       if (severity !== "all") params.set("severity", severity);
       const res = await fetch(`/api/logistics/fleet/alerts?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`Gagal mengambil alert (HTTP ${res.status})`);
       return res.json() as Promise<{
         alerts: Array<Record<string, unknown>>;
         unreadCount: number;
@@ -143,6 +144,13 @@ export default function FleetAlertsPage() {
             Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-20 bg-slate-800/60 rounded-xl border border-slate-700 animate-pulse" />
             ))
+          ) : isError ? (
+            <Card className="bg-slate-800/60 border-red-700/60">
+              <CardContent className="py-10 text-center">
+                <p className="text-red-300">Gagal memuat alert operasional</p>
+                <p className="text-slate-400 text-sm mt-2">{error instanceof Error ? error.message : "Silakan coba kembali."}</p>
+              </CardContent>
+            </Card>
           ) : alerts.length === 0 ? (
             <Card className="bg-slate-800/60 border-slate-700">
               <CardContent className="py-16 text-center">
