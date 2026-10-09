@@ -31,10 +31,10 @@ const tick = async () => {
     ]);
     if (reminders.length) logger.info({ result: reminders }, "Fleet WA reminder sweep completed");
     if (alerts.length) logger.info({ result: alerts }, "Fleet alert sweep completed");
-    await runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
   } catch (error) {
     logger.error({ error }, "Fleet background sweep failed");
   } finally {
+    await runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
     running = false;
   }
 };
