@@ -38,6 +38,28 @@ export async function runFleetGojekScheduledSyncSweep(): Promise<number[]> {
       `, [companyId, actor]);
       if (result.rowCount) queued.push(companyId);
     }
+    // Transactions are an independent job: a failed transaction export must not
+    // interrupt the existing driver/outstanding snapshot or WhatsApp schedules.
+    for (const row of companies.rows) {
+      const companyId = Number(row.company_id);
+      const txActor = `fleet-scheduler-transactions-0100-wib:${day}`;
+      await client.query(`
+        INSERT INTO public.fleet_gojek_sync_jobs(company_id,requested_by,status)
+        SELECT $1,$2,'pending'
+        WHERE EXISTS (
+          SELECT 1 FROM public.fleet_gojek_sync_jobs
+          WHERE company_id=$1 AND requested_by=$3 AND status='succeeded'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.fleet_gojek_sync_jobs
+          WHERE company_id=$1 AND requested_by=$2
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.fleet_gojek_sync_jobs
+          WHERE company_id=$1 AND status IN ('pending','running')
+        )
+      `,[companyId,txActor,actor]);
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
