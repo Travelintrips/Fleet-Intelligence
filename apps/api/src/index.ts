@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { runFleetAutoReminderSweep } from "./lib/fleet-wa-reminder";
+import { runFleetAutoReminderSweep, runFleetOneTimeResend } from "./lib/fleet-wa-reminder";
 import { runFleetAlertSweep } from "./lib/fleet-alerts";
 import { runFleetGojekScheduledSyncSweep } from "./lib/fleet-gojek-scheduler";
 import { runFleetGroupReportSweep } from "./lib/fleet-group-report";
@@ -42,12 +42,17 @@ const timer = setInterval(() => void tick(), 5 * 60 * 1000);
 timer.unref();
 setTimeout(() => void tick(), 20_000).unref();
 
+const runResend = () => void runFleetOneTimeResend().catch(error => logger.error({error}, "Fleet one-time resend failed"));
+const resendTimer = setInterval(runResend, 60 * 1000);
+resendTimer.unref();
+setTimeout(runResend, 25_000).unref();
+
 const runGroupReport = () => void runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
 const reportTimer = setInterval(runGroupReport, 5 * 60 * 1000);
 reportTimer.unref();
 setTimeout(runGroupReport, 35_000).unref();
 
-const stop = () => { clearInterval(timer); clearInterval(reportTimer); };
+const stop = () => { clearInterval(timer); clearInterval(reportTimer); clearInterval(resendTimer); };
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 server.on("error", (error) => {
