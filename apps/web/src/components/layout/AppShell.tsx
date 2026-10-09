@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Activity,
@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Link2,
   LogOut,
+  X,
 } from "lucide-react";
 
 const NAV = [
@@ -38,6 +39,8 @@ function isActive(location: string, href: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => { setMobileMenuOpen(false); }, [location]);
 
   return (
     <div className="min-h-screen text-slate-100">
@@ -46,8 +49,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="absolute right-[6%] top-[10%] h-[24rem] w-[24rem] rounded-full bg-cyan-500/8 blur-3xl" />
       </div>
 
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] border-r border-white/[0.07] bg-slate-950/78 px-3 py-4 backdrop-blur-2xl lg:block">
+      {mobileMenuOpen && (
+        <button aria-label="Tutup menu navigasi" className="fixed inset-0 z-40 bg-black/65 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+      )}
+      <aside className={"fixed inset-y-0 left-0 z-50 w-[min(290px,85vw)] border-r border-white/[0.07] bg-slate-950 px-3 py-4 backdrop-blur-2xl transition-transform duration-200 lg:z-40 lg:w-[248px] lg:translate-x-0 " + (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="mb-7 flex items-center gap-3 px-3">
+          <button aria-label="Tutup navigasi" className="ml-auto order-last rounded-lg p-2 text-slate-300 lg:hidden" onClick={() => setMobileMenuOpen(false)}><X className="h-5 w-5" /></button>
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/25 to-cyan-400/10 shadow-lg shadow-indigo-950/30">
             <Activity className="h-5 w-5 text-indigo-300" />
           </div>
@@ -94,18 +101,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="lg:pl-[248px]">
         <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#060a16]/72 backdrop-blur-2xl">
           <div className="flex min-h-16 items-center justify-between gap-4 px-4 md:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] lg:hidden">
-                <Menu className="h-4 w-4 text-slate-300" />
-              </div>
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+              <button type="button" aria-label="Buka menu navigasi" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] lg:hidden">
+                <Menu className="h-5 w-5 text-slate-300" />
+              </button>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold tracking-[-0.015em] text-slate-100">Fleet Operations Command Center</div>
                 <div className="hidden text-xs text-slate-500 sm:block">Monitoring, collections, driver performance & fleet controls</div>
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/[0.055] px-3 py-1.5 text-[11px] font-medium text-emerald-300">
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <div className="flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/[0.055] px-2 sm:px-3 py-1.5 text-[11px] font-medium text-emerald-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_9px_rgba(52,211,153,.8)]" />
                 Production
               </div>
@@ -120,27 +127,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <div className="overflow-x-auto border-t border-white/[0.05] px-3 py-2 lg:hidden">
-            <nav className="flex min-w-max gap-1">
-              {NAV.map(({ label, href, icon: Icon }) => {
-                const active = isActive(location, href);
-                return (
-                  <Link key={href} href={href}>
-                    <span className={
-                      "flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs " +
-                      (active ? "bg-indigo-500/20 text-indigo-200" : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-200")
-                    }>
-                      <Icon className="h-3.5 w-3.5" />
-                      {label}
-                    </span>
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
         </header>
 
-        <main className="fleet-page px-4 py-5 md:px-6 md:py-7 lg:px-8 lg:py-8">{children}</main>
+        <main className="fleet-page min-w-0 px-3 py-4 sm:px-4 sm:py-5 md:px-6 md:py-7 lg:px-8 lg:py-8">{children}</main>
       </div>
     </div>
   );
