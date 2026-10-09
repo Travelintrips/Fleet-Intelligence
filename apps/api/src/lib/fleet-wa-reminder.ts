@@ -238,8 +238,9 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     auto_blast_hour: number | null;
     auto_blast_last_run: string | Date | null;
     last_attempt_at: string | Date | null;
+    last_error: string | null;
   }>(
-    `SELECT s.company_id,s.auto_blast_hour,s.auto_blast_last_run,w.last_attempt_at
+    `SELECT s.company_id,s.auto_blast_hour,s.auto_blast_last_run,w.last_attempt_at,w.last_error
        FROM public.fleet_settings s
        LEFT JOIN public.fleet_wa_worker_state w ON w.company_id=s.company_id
       WHERE s.auto_blast_enabled=true`,
@@ -265,7 +266,7 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     if (hourWib < configuredHour || (lastRunDate === dateWib && (!catchup || lastRunHour >= 16))) continue;
 
     const lastAttemptMs = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : 0;
-    const retryBackoffMs = 30 * 60 * 1000;
+    const retryBackoffMs = row.last_error?.startsWith('WA Fleet belum siap') ? 5 * 60 * 1000 : 30 * 60 * 1000;
     if (lastAttemptMs && Date.now() - lastAttemptMs < retryBackoffMs) continue;
 
     // Fresh Gojek export is mandatory for scheduled WA reminders.
