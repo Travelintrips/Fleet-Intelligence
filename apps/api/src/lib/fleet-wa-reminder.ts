@@ -7,6 +7,9 @@ type ReminderRow = {
   driver_phone: string | null;
   vehicle_plate: string | null;
   outstanding_amount: string | number;
+  prior_day: string;
+  prior_day_fee: string | null;
+  prior_day_deduction: string | null;
 };
 
 export type FleetReminderSweepResult = {
@@ -94,14 +97,23 @@ async function updateWorkerState(companyId: number, patch: {
 
 function reminderMessage(row: ReminderRow): string {
   const plate = String(row.vehicle_plate ?? "").trim();
+  const hasPreviousDay = row.prior_day_fee !== null && row.prior_day_deduction !== null;
+  const fee = Number(row.prior_day_fee ?? 0);
+  const paid = Number(row.prior_day_deduction ?? 0);
+  const priorDate = new Date(row.prior_day + "T00:00:00+07:00")
+    .toLocaleDateString("id-ID",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Jakarta"});
   return [
     `Yth. Bapak/Ibu ${row.driver_name},`,
     "",
-    "Pengingat outstanding driver GoCar - PT Diva Servis.",
+    "Pengingat pembayaran kendaraan GoCar - PT Diva Servis.",
     plate ? `Kendaraan: ${plate}` : null,
-    `Outstanding saat ini: ${formatIdr(row.outstanding_amount)}`,
+    hasPreviousDay ? `Rincian tanggal ${priorDate}:` : null,
+    hasPreviousDay ? `Tagihan Harian Kendaraan: ${formatIdr(fee)}` : null,
+    hasPreviousDay ? `Pembayaran melalui saldo Gojek: ${formatIdr(paid)}` : null,
+    hasPreviousDay ? `Sisa Tagihan Harian: ${formatIdr(fee-paid)}` : null,
+    `Total Sisa Tagihan: ${formatIdr(row.outstanding_amount)}`,
     "",
-    "Mohon melakukan penyelesaian outstanding sesuai ketentuan yang berlaku.",
+    "Mohon melakukan penyelesaian sisa kewajiban pembayaran sesuai ketentuan yang berlaku.",
     "Jika pembayaran sudah dilakukan, abaikan pesan ini dan simpan bukti pembayaran untuk verifikasi.",
     "",
     "Terima kasih.",
@@ -135,6 +147,25 @@ export async function sendFleetOutstandingReminders(args: {
 
   const result = await pool.query<ReminderRow & { suppressed: boolean }>(
     `SELECT o.id,o.driver_name,
+            ((NOW() AT TIME ZONE 'Asia/Jakarta')::date - 1)::text AS prior_day,
+            (SELECT SUM(t.amount)::text
+               FROM public.fleet_transactions t
+              WHERE t.company_id=o.company_id
+                AND t.transaction_date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date - 1
+                AND LOWER(TRIM(t.driver_name))=LOWER(TRIM(o.driver_name))
+                AND (NULLIF(t.vehicle_plate,'') IS NULL
+                    OR UPPER(TRIM(t.vehicle_plate))=UPPER(TRIM(COALESCE(NULLIF(d.vehicle_plate,''),o.vehicle_plate))))
+                AND t.transaction_type='Rental fee due'
+                AND t.amount>0) AS prior_day_fee,
+            (SELECT ABS(SUM(t.amount))::text
+               FROM public.fleet_transactions t
+              WHERE t.company_id=o.company_id
+                AND t.transaction_date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date - 1
+                AND LOWER(TRIM(t.driver_name))=LOWER(TRIM(o.driver_name))
+                AND (NULLIF(t.vehicle_plate,'') IS NULL
+                    OR UPPER(TRIM(t.vehicle_plate))=UPPER(TRIM(COALESCE(NULLIF(d.vehicle_plate,''),o.vehicle_plate))))
+                AND t.transaction_type='Rental fee deduction'
+                AND t.amount<0) AS prior_day_deduction,
             COALESCE(NULLIF(d.phone,''),NULLIF(o.driver_phone,'')) AS driver_phone,
             COALESCE(NULLIF(d.vehicle_plate,''),NULLIF(o.vehicle_plate,'')) AS vehicle_plate,
             o.outstanding_amount,
