@@ -61,6 +61,7 @@ export async function runFleetGroupReportSweep() {
       SELECT DISTINCT ON (company_id) id,finished_at,result
       FROM public.fleet_gojek_sync_jobs
       WHERE status='succeeded'
+      AND result->>'exportType'='driver_snapshot'
       AND (finished_at AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date
       ORDER BY company_id,finished_at DESC
     `);
