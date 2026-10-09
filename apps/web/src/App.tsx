@@ -40,6 +40,8 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [email,setEmail]=React.useState("");
   const [password,setPassword]=React.useState("");
   const [loading,setLoading]=React.useState(false);
+  const [googleEnabled,setGoogleEnabled]=React.useState(false);
+  React.useEffect(()=>{void fetch("/api/auth/google/status",{credentials:"include"}).then(r=>r.ok?r.json():null).then(v=>setGoogleEnabled(v?.enabled===true)).catch(()=>undefined);},[]);
   const devLoginEnabled=String(import.meta.env.VITE_ENABLE_DEV_LOGIN ?? "").toLowerCase()==="true";
 
   async function login(path:string, body:Record<string,string>) {
@@ -71,6 +73,15 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           <input className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required />
           <button disabled={loading} className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-medium disabled:opacity-50">{loading?"Memproses…":"Masuk"}</button>
         </form>
+        {googleEnabled && (
+          <div className="mt-4">
+            <div className="mb-3 flex items-center gap-3 text-xs text-slate-500"><span className="h-px flex-1 bg-slate-700" />atau<span className="h-px flex-1 bg-slate-700" /></div>
+            <a href="/api/auth/google/start" className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-600 bg-white px-3 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-100">
+              Lanjutkan dengan Google
+            </a>
+            <p className="mt-2 text-center text-xs text-slate-400">Hanya untuk akun CST Fleet yang sudah disetujui admin.</p>
+          </div>
+        )}
         {devLoginEnabled && (
           <button disabled={loading||!email} onClick={()=>void login("/api/auth/dev-login",{email})} className="mt-3 w-full rounded-lg border border-amber-600/60 px-3 py-2.5 text-sm text-amber-300 disabled:opacity-50">
             DEV Login dengan email

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import fleetIntelligenceRouter from "./fleet-intelligence";
 import localProductionAuthRouter from "./local-production-auth";
+import googleAuthRouter from "./google-auth";
 import { createDevAuthRouter } from "./dev-auth";
 import { pool } from "../lib/db";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
@@ -119,6 +120,7 @@ router.get("/integrationz", async (req, res) => {
 
 router.use(createDevAuthRouter());
 router.use(localProductionAuthRouter);
+router.use(googleAuthRouter);
 router.use("/logistics/fleet", fleetIntelligenceRouter);
 
 router.use((_req, res) => {
