@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Users, DollarSign, AlertTriangle, RefreshCw,
-  Wrench, Search, ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown,
+  Search, ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown,
   MessageCircle, CheckCircle, Send, RotateCcw, Database, Clock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -151,24 +151,6 @@ export default function FleetIntelligenceDashboard() {
       if (!res.ok) throw new Error(String(payload?.error ?? "Gagal memuat outstanding Fleet"));
       return payload as { outstanding: OutstandingRow[]; summary: Record<string, unknown> };
     },
-  });
-
-  const repairMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/logistics/fleet/outstanding/repair", {
-        method: "POST", credentials: "include",
-      });
-      if (!res.ok) throw new Error("Gagal perbaiki outstanding");
-      return res.json() as Promise<{ ok: boolean; summary: Record<string, unknown> }>;
-    },
-    onSuccess: (d) => {
-      toast.success(`Outstanding diperbarui: ${fmtIdr(d.summary?.total)} (${fmtNum(d.summary?.drivers)} driver)`);
-      qc.invalidateQueries({ queryKey: ["fleet-dashboard"] });
-      qc.invalidateQueries({ queryKey: ["fleet-outstanding-index"] });
-      refetch();
-      ostRefetch();
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const waBlastMutation = useMutation({
@@ -368,15 +350,11 @@ export default function FleetIntelligenceDashboard() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline" size="sm"
-              className="gap-2 border-amber-600 text-amber-400 hover:bg-amber-900/20"
-              disabled={repairMutation.isPending}
-              onClick={() => repairMutation.mutate()}
-            >
-              <Wrench className="w-4 h-4" />
-              {repairMutation.isPending ? "Menghitung..." : "Perbaiki Outstanding"}
-            </Button>
+            <Link href="/logistics/fleet-intelligence/gojek-connector">
+              <Button variant="outline" size="sm" className="gap-2 border-amber-600 text-amber-400 hover:bg-amber-900/20">
+                Sinkronisasi Gojek
+              </Button>
+            </Link>
             <Button variant="outline" size="sm" onClick={() => { refetch(); ostRefetch(); }} className="gap-2">
               <RefreshCw className="w-4 h-4" /> Refresh
             </Button>
