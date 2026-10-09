@@ -228,7 +228,7 @@ export default function FleetAlertsPage() {
             <h3 className="text-white font-medium mb-2 text-sm">Jenis Alert Otomatis</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
               {[
-                { icon: <AlertTriangle className="w-4 h-4 text-amber-400" />, title: "Outstanding Tinggi", desc: "Driver dengan saldo hutang ≥ Rp 500.000 — warning; ≥ Rp 1.000.000 menjadi critical" },
+                { icon: <AlertTriangle className="w-4 h-4 text-amber-400" />, title: "Outstanding Tinggi", desc: "Driver dengan saldo hutang ≥ Rp 50.000 — warning; ≥ Rp 1.000.000 menjadi critical" },
                 { icon: <BellOff className="w-4 h-4 text-blue-400" />, title: "Driver Tidak Aktif", desc: "Driver aktif tanpa aktivitas selama ≥7 hari — alert otomatis ke dashboard" },
                 { icon: <XCircle className="w-4 h-4 text-red-400" />, title: "Revenue Turun >15%", desc: "Revenue 7 hari turun >15% vs 7 hari sebelumnya; ≥30% menjadi critical" },
               ].map((item) => (
