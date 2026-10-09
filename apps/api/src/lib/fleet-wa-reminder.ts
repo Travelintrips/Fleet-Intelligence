@@ -118,6 +118,7 @@ export async function sendFleetOutstandingReminders(args: {
   minOutstanding?: number;
   phoneOverride?: string;
   messageOverride?: string;
+  oneTimeResendId?: string;
 }): Promise<FleetReminderSweepResult> {
   const companyId = args.companyId;
   const suppressHours = Math.max(1, Math.min(168, Number(args.suppressHours) || 24));
@@ -169,7 +170,7 @@ export async function sendFleetOutstandingReminders(args: {
   const allowOverrides = ids.length === 1;
 
   for (const row of result.rows) {
-    if (row.suppressed) {
+    if (row.suppressed && !args.oneTimeResendId) {
       skippedSuppressed += 1;
       continue;
     }
@@ -185,7 +186,7 @@ export async function sendFleetOutstandingReminders(args: {
       const provider = await sendFleetWa({
         phone,
         message,
-        idempotencyKey: `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
+        idempotencyKey: args.oneTimeResendId ? `fleet-wa:one-time:${args.oneTimeResendId}:${row.id}` : `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
       });
       senderDevice = provider.senderDevice ?? senderDevice;
       deviceStatus = provider.deviceStatus ?? deviceStatus;
@@ -361,4 +362,34 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     }
   }
   return output;
+}
+
+export async function runFleetOneTimeResend() {
+  const claim = await pool.query<{id:string;company_id:number;driver_ids:number[]}>(`
+    UPDATE public.fleet_one_time_resend
+    SET state='running',updated_at=NOW()
+    WHERE id=(SELECT id FROM public.fleet_one_time_resend WHERE state='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+    RETURNING id,company_id,driver_ids
+  `);
+  const job = claim.rows[0];
+  if (!job) return;
+  try {
+    const result = await sendFleetOutstandingReminders({
+      companyId: job.company_id,
+      ids: job.driver_ids,
+      actor: "one-time-resend:" + job.id,
+      sendType: "auto",
+      minOutstanding: 50000,
+      oneTimeResendId: job.id,
+    });
+    await pool.query(
+      "UPDATE public.fleet_one_time_resend SET state='completed',result=$2::jsonb,updated_at=NOW() WHERE id=$1",
+      [job.id,JSON.stringify(result)],
+    );
+  } catch (error) {
+    await pool.query(
+      "UPDATE public.fleet_one_time_resend SET state='failed',error=$2,updated_at=NOW() WHERE id=$1",
+      [job.id,String(error).slice(0,500)],
+    );
+  }
 }
