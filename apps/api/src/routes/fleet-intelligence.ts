@@ -3797,29 +3797,54 @@ router.get("/accounting/journals", async (req: AdminRequest, res) => {
 });
 
 router.post("/accounting/journals/generate", async (req: AdminRequest, res) => {
-  try{
-    const cid=companyId(req),body=req.body??{},from=String(body.periodStart??""),to=String(body.periodEnd??""),ppnRate=Number(body.ppnRate??11);
-    if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to)||from>to||!Number.isFinite(ppnRate)||ppnRate<0||ppnRate>100){res.status(400).json({error:"Periode/PPN tidak valid."});return;}
-    const agg=await pool.query(
-      `SELECT COALESCE(SUM(gross_revenue),0)::numeric gross,COALESCE(SUM(net_revenue),0)::numeric net,
-              COALESCE(SUM(commission),0)::numeric commission,COALESCE(SUM(incentive),0)::numeric incentive,
-              COALESCE(SUM(outstanding_balance),0)::numeric outstanding
-       FROM public.fleet_transactions WHERE company_id=$1 AND transaction_date BETWEEN $2::date AND $3::date`,[cid,from,to]);
-    const a=agg.rows[0]??{},gross=Number(a.gross??0),net=Number(a.net??0),commission=Number(a.commission??0),incentive=Number(a.incentive??0),outstanding=Number(a.outstanding??0);
-    const ppn=gross*(ppnRate/100),ref=`FLT-${from.replaceAll("-","")}-${to.replaceAll("-","")}`;
-    const existing=await pool.query("SELECT * FROM public.fleet_accounting_journals WHERE company_id=$1 AND reference_no=$2 LIMIT 1",[cid,ref]);
-    if(existing.rows[0]){res.json({ok:true,journal:existing.rows[0],idempotent:true});return;}
-    const result=await pool.query(
-      `INSERT INTO public.fleet_accounting_journals(company_id,journal_date,reference_no,status,journal_type,gross_revenue,outstanding_amount,driver_payout,ppn_amount,ppn_rate,net_revenue,commission_total,incentive_total,period_start,period_end,created_by,notes,raw_stats)
-       VALUES($1,CURRENT_DATE,$2,'draft','fleet_revenue',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb) RETURNING *`,
-      [cid,ref,gross,outstanding,Math.max(gross-net,0),ppn,ppnRate,net,commission,incentive,from,to,req.adminUser?.email??"unknown",typeof body.notes==="string"?body.notes:null,JSON.stringify({source:"fleet_transactions",generatedAt:new Date().toISOString()})]);
-    res.status(201).json({ok:true,journal:result.rows[0]});
-  }catch(error){req.log.error({error},"Fleet journal generate failed");res.status(503).json({error:"Gagal generate jurnal fleet."});}
+  try {
+    const cid = companyId(req), body = req.body ?? {};
+    const from = String(body.periodStart ?? ""), to = String(body.periodEnd ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      res.status(400).json({ error: "Periode jurnal tidak valid." }); return;
+    }
+    const agg = await pool.query(
+      `SELECT COUNT(*)::int AS count,
+              COALESCE(SUM(gross_revenue),0)::numeric AS gross,
+              COALESCE(SUM(net_revenue),0)::numeric AS net,
+              COALESCE(SUM(commission),0)::numeric AS commission,
+              COALESCE(SUM(incentive),0)::numeric AS incentive,
+              COALESCE(SUM(ppn_amount),0)::numeric AS ppn
+         FROM public.fleet_transactions
+        WHERE company_id=$1 AND transaction_date BETWEEN $2::date AND $3::date`,
+      [cid, from, to],
+    );
+    const a = agg.rows[0];
+    if (!Number(a?.count)) { res.status(422).json({ error: "Tidak ada transaksi pada periode tersebut. Jurnal tidak dibuat." }); return; }
+    const ref = `FLT-${from.replaceAll("-", "")}-${to.replaceAll("-", "")}`;
+    const existing = await pool.query("SELECT * FROM public.fleet_accounting_journals WHERE company_id=$1 AND reference_no=$2 LIMIT 1", [cid, ref]);
+    if (existing.rows[0]) { res.json({ ok:true, journal:existing.rows[0], idempotent:true }); return; }
+
+    // Source data does not establish the contractual tax base or a balanced COA mapping.
+    // Preserve source amounts for review; do not invent VAT, driver payouts, or receivables.
+    const gross = Number(a.gross), net = Number(a.net), ppn = Number(a.ppn);
+    const result = await pool.query(
+      `INSERT INTO public.fleet_accounting_journals
+        (company_id,journal_date,reference_no,status,journal_type,gross_revenue,outstanding_amount,
+         driver_payout,ppn_amount,ppn_rate,net_revenue,commission_total,incentive_total,
+         period_start,period_end,created_by,notes,raw_stats)
+       VALUES ($1,CURRENT_DATE,$2,'draft','fleet_revenue',$3,0,0,$4,0,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING *`,
+      [cid,ref,gross,ppn,net,Number(a.commission),Number(a.incentive),from,to,
+       req.adminUser?.email ?? "unknown",typeof body.notes === "string" ? body.notes : null,
+       JSON.stringify({source:"fleet_transactions",transactionCount:Number(a.count),taxSource:"transaction.ppn_amount",accountingReviewRequired:true,balanced:false,generatedAt:new Date().toISOString()})],
+    );
+    res.status(201).json({ ok:true, journal:result.rows[0], reviewRequired:true });
+  } catch (error) {
+    req.log.error({error},"Fleet journal generate failed");
+    res.status(503).json({error:"Gagal generate jurnal fleet."});
+  }
 });
 
 router.put("/accounting/journals/:id/approve", async (req: AdminRequest, res) => {
   try{
     const cid=companyId(req),id=Number(req.params.id);
+    const review=await pool.query("SELECT raw_stats FROM public.fleet_accounting_journals WHERE id=$1 AND company_id=$2",[id,cid]);
+    if(review.rows[0]?.raw_stats?.accountingReviewRequired===true){res.status(409).json({error:"Jurnal menunggu validasi COA dan keseimbangan debit-kredit. Persetujuan belum diizinkan."});return;}
     const result=await pool.query(`UPDATE public.fleet_accounting_journals SET status='approved',approved_by=$3,approved_at=NOW(),updated_at=NOW() WHERE id=$1 AND company_id=$2 AND status='draft' RETURNING *`,[id,cid,req.adminUser?.email??"unknown"]);
     if(result.rowCount!==1){res.status(409).json({error:"Jurnal tidak ditemukan atau bukan draft."});return;}
     res.json({ok:true,journal:result.rows[0]});
