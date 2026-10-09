@@ -75,29 +75,6 @@ export async function runFleetGroupReportSweep() {
           "\nOutstanding diperbarui: " + String(details.outstandingUpserted ?? "-")
       });
     }
-    const reminders = await client.query<{company_id:number;last_attempt_at:Date;last_result:unknown}>(`
-      SELECT company_id,last_attempt_at,last_result FROM public.fleet_wa_worker_state
-      WHERE last_attempt_at IS NOT NULL AND last_result IS NOT NULL
-      AND (last_attempt_at AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date
-    `);
-    for (const w of reminders.rows) {
-      const data = w.last_result as Record<string, unknown>;
-      const sent = await client.query<{count:string}>(`
-        SELECT COUNT(DISTINCT outstanding_id)::text AS count
-        FROM public.fleet_wa_logs
-        WHERE company_id=$1 AND status='sent'
-        AND (sent_at AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date
-      `,[w.company_id]);
-      reports.push({
-        key: "reminder:" + w.company_id + ":" + today + ":" + new Date(w.last_attempt_at).toISOString(),
-        message: "CST Fleet | Laporan WA Driver\nTanggal: " + today +
-          "\nTotal calon penerima: " + String(data.eligible ?? "-") +
-          "\nTerkirim tercatat hari ini: " + String(sent.rows[0]?.count ?? "0") +
-          "\nGagal pada proses terakhir: " + String(data.failed ?? "-") +
-          "\nDilewati (duplikat): " + String(data.skippedSuppressed ?? "-") +
-          "\nCatatan: status sent adalah penerimaan oleh WA Gateway, bukan bukti dibaca."
-      });
-    }
     // Mirror the original driver reminder body, not the metadata/status card.
     // Only automatic reminders for active drivers, >= Rp50,000; no historical replay.
     const originals = await client.query<{id:number;message:string}>(`
