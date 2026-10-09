@@ -238,8 +238,9 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     auto_blast_hour: number | null;
     auto_blast_last_run: string | Date | null;
     last_attempt_at: string | Date | null;
+    last_error: string | null;
   }>(
-    `SELECT s.company_id,s.auto_blast_hour,s.auto_blast_last_run,w.last_attempt_at
+    `SELECT s.company_id,s.auto_blast_hour,s.auto_blast_last_run,w.last_attempt_at,w.last_error
        FROM public.fleet_settings s
        LEFT JOIN public.fleet_wa_worker_state w ON w.company_id=s.company_id
       WHERE s.auto_blast_enabled=true`,
@@ -254,7 +255,7 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     const companyId = Number(row.company_id);
     const configuredHour = Number(row.auto_blast_hour ?? 8);
     const lastRunDate = row.auto_blast_last_run
-      ? new Date(row.auto_blast_last_run).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
+      ? new Date(new Date(row.auto_blast_last_run).getTime() + 7 * 3600000).toISOString().slice(0, 10)
       : null;
 
     // One-time catch-up on 9 Oct at 16:00 WIB; normal 08:00 resumes tomorrow.
@@ -265,7 +266,7 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     if (hourWib < configuredHour || (lastRunDate === dateWib && (!catchup || lastRunHour >= 16))) continue;
 
     const lastAttemptMs = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : 0;
-    const retryBackoffMs = 30 * 60 * 1000;
+    const retryBackoffMs = row.last_error?.startsWith('WA Fleet belum siap') ? 5 * 60 * 1000 : 30 * 60 * 1000;
     if (lastAttemptMs && Date.now() - lastAttemptMs < retryBackoffMs) continue;
 
     // Fresh Gojek export is mandatory for scheduled WA reminders.
@@ -331,11 +332,11 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
         minOutstanding: 50_000,
       });
       await updateWorkerState(companyId, {
-        success: result.failed === 0,
+        success: result.failed === 0 && (result.sent + result.skippedSuppressed + result.skippedNoPhone) === result.eligible && result.skippedNoPhone === 0,
         senderDevice: result.senderDevice ?? null,
         deviceStatus: result.deviceStatus ?? null,
         result,
-        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim: ${result.lastError ?? "provider error"}` : null,
+        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim: ${result.lastError ?? "provider error"}` : result.skippedNoPhone > 0 ? `${result.skippedNoPhone} driver tidak memiliki nomor WhatsApp valid.` : null,
       });
 
       if (result.failed > 0) {
