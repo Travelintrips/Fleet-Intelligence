@@ -181,7 +181,7 @@ body {
   .fleet-page [data-slot="card-content"],
   .fleet-page [data-slot="card-header"] { min-width: 0; }
   .fleet-page :is(input, select, textarea) { max-width: 100%; }
-  .fleet-page table { min-width: max-content; }
+  .fleet-page table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .fleet-page :is([class*="overflow-x-auto"], [class*="overflow-auto"]) { max-width: 100%; -webkit-overflow-scrolling: touch; }
   .fleet-page button, .fleet-page a { touch-action: manipulation; }
 }
