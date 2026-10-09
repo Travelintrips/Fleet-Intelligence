@@ -316,10 +316,10 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
           AND (
             auto_blast_last_run IS NULL
             OR (auto_blast_last_run AT TIME ZONE 'Asia/Jakarta')::date < (NOW() AT TIME ZONE 'Asia/Jakarta')::date
-            OR ($2::boolean AND (auto_blast_last_run AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date AND EXTRACT(HOUR FROM auto_blast_last_run AT TIME ZONE 'Asia/Jakarta') < 16)
+            OR ((NOW() AT TIME ZONE 'Asia/Jakarta')::date = DATE '2026-10-09' AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'Asia/Jakarta') >= 16 AND (auto_blast_last_run AT TIME ZONE 'Asia/Jakarta')::date = DATE '2026-10-09' AND EXTRACT(HOUR FROM auto_blast_last_run AT TIME ZONE 'Asia/Jakarta') < 16)
           )
         RETURNING company_id`,
-      [companyId, catchup],
+      [companyId],
     );
     if (!claimed.rowCount) continue;
 
