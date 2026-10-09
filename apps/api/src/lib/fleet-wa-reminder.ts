@@ -254,7 +254,7 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     const companyId = Number(row.company_id);
     const configuredHour = Number(row.auto_blast_hour ?? 8);
     const lastRunDate = row.auto_blast_last_run
-      ? new Date(row.auto_blast_last_run).toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })
+      ? new Date(new Date(row.auto_blast_last_run).getTime() + 7 * 3600000).toISOString().slice(0, 10)
       : null;
 
     // One-time catch-up on 9 Oct at 16:00 WIB; normal 08:00 resumes tomorrow.
@@ -331,11 +331,11 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
         minOutstanding: 50_000,
       });
       await updateWorkerState(companyId, {
-        success: result.failed === 0,
+        success: result.failed === 0 && (result.sent + result.skippedSuppressed + result.skippedNoPhone) === result.eligible && result.skippedNoPhone === 0,
         senderDevice: result.senderDevice ?? null,
         deviceStatus: result.deviceStatus ?? null,
         result,
-        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim: ${result.lastError ?? "provider error"}` : null,
+        error: result.failed > 0 ? `${result.failed} pesan gagal dikirim: ${result.lastError ?? "provider error"}` : result.skippedNoPhone > 0 ? `${result.skippedNoPhone} driver tidak memiliki nomor WhatsApp valid.` : null,
       });
 
       if (result.failed > 0) {
