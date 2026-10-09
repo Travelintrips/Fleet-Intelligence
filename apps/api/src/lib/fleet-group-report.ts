@@ -75,29 +75,8 @@ export async function runFleetGroupReportSweep() {
           "\nOutstanding diperbarui: " + String(details.outstandingUpserted ?? "-")
       });
     }
-    // Mirror the original driver reminder body, not the metadata/status card.
-    // Only automatic reminders for active drivers, >= Rp50,000; no historical replay.
-    const originals = await client.query<{id:number;message:string}>(`
-      SELECT l.id,l.message
-      FROM public.fleet_wa_logs l
-      JOIN public.fleet_outstanding o ON o.id=l.outstanding_id AND o.company_id=l.company_id
-      JOIN public.fleet_drivers d ON d.id=o.driver_id AND d.company_id=o.company_id::text
-      WHERE l.status='sent'
-        AND l.send_type='auto'
-        AND l.outstanding_amount >= 50000
-        AND o.outstanding_amount >= 50000
-        AND o.status='open'
-        AND d.status='active'
-        AND COALESCE(d.source_present_in_latest_snapshot,true)=true
-        AND l.message IS NOT NULL AND LENGTH(TRIM(l.message))>0
-        AND l.sent_at >= TIMESTAMPTZ '2026-10-09 09:30:00+00'
-        AND (l.sent_at AT TIME ZONE 'Asia/Jakarta')::date =
-            (NOW() AT TIME ZONE 'Asia/Jakarta')::date
-      ORDER BY l.id
-    `);
-    for (const original of originals.rows) {
-      reports.push({key:"driver-original:"+original.id,message:original.message});
-    }
+    // Driver reminder copies are delivered by WA Gateway device group routing.
+    // Do not mirror them again here; otherwise each driver reminder appears twice.
     for (const report of reports) {
       const claim = await client.query<{report_key:string}>(`
         INSERT INTO public.fleet_group_report_log(report_key,status)
