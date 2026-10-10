@@ -179,14 +179,16 @@ export default function FleetIntelligenceDashboard() {
   const outstandingSummary = data?.outstanding ?? {};
   const rawTotals = data?.rawTotals ?? {};
   const gojekOverview = data?.gojekOverview ?? null;
-  // A 30-day comparison must use precisely 30 elapsed calendar days.
-  // Do not show a 31-day or older overview as the current 30-day result.
+  // Never present an old Overview snapshot as current or mix its date range
+  // with the dashboard transaction filter.
+  const todayWib = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
   const overviewPeriodValid = Boolean(gojekOverview &&
     /^\d{4}-\d{2}-\d{2}$/.test(gojekOverview.periodStart) &&
     /^\d{4}-\d{2}-\d{2}$/.test(gojekOverview.periodEnd) &&
-    (Date.parse(gojekOverview.periodEnd + "T00:00:00Z") -
-      Date.parse(gojekOverview.periodStart + "T00:00:00Z")) === 30 * 86400000);
-
+    gojekOverview.periodStart <= gojekOverview.periodEnd &&
+    gojekOverview.periodEnd === todayWib);
   const snapshotSummary = data?.snapshotSummary ?? {};
   const dataSource = data?.dataSource ?? "driver_snapshot";
   const dataQuality = data?.dataQuality ?? {};
@@ -390,14 +392,14 @@ export default function FleetIntelligenceDashboard() {
               <div>
                 <div className="text-sm text-slate-300">Total Pendapatan Gojek (Net Earnings)</div>
                 <div className="text-2xl font-bold text-sky-300 mt-1">
-                  {gojekOverview && overviewPeriodValid ? fmtIdr(gojekOverview.netEarnings) : "Perlu sinkronisasi periode 30 hari"}
+                  {gojekOverview && overviewPeriodValid ? fmtIdr(gojekOverview.netEarnings) : "Perlu sinkronisasi Gojek terbaru"}
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
                   {gojekOverview
                     ? `Periode tersimpan Gojek: ${gojekOverview.periodStart} s.d. ${gojekOverview.periodEnd} · diperbarui ${new Date(gojekOverview.capturedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB`
                     : "Nilai diambil dari halaman Overview pada sinkronisasi driver Gojek berikutnya."}
                 </div>
-                {!overviewPeriodValid && gojekOverview && <div className="text-xs text-amber-300 mt-1">Periode data tersimpan tidak cocok dengan 30 hari terakhir. Jalankan sinkronisasi Overview dengan tanggal yang sesuai di Gojek; nominal lama disembunyikan agar tidak menyesatkan.</div>}
+                {!overviewPeriodValid && gojekOverview && <div className="text-xs text-amber-300 mt-1">Data Overview tidak berakhir pada tanggal hari ini (WIB). Nominal lama tidak ditampilkan sebagai angka terkini; lakukan sinkronisasi Gojek terbaru.</div>}
                 <div className="text-xs text-slate-500 mt-1">
                   Angka Overview Gojek, bukan Rental Fee dan belum diklasifikasikan sebagai laba bersih perusahaan.
                 </div>
