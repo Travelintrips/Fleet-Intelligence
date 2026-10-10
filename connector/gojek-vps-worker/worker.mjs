@@ -162,7 +162,12 @@ async function syncJob(payload) {
         if (earningMatch && dateMatch) {
           const netEarnings = Number(earningMatch[1].replace(/\D/g, ""));
           if (Number.isFinite(netEarnings) && netEarnings >= 0) {
-            overview = { netEarnings, periodStart: dateMatch[1], periodEnd: dateMatch[2] };
+            const periodDays = (Date.parse(dateMatch[2] + 'T00:00:00Z') - Date.parse(dateMatch[1] + 'T00:00:00Z')) / 86400000;
+            if (periodDays === 30) {
+              overview = { netEarnings, periodStart: dateMatch[1], periodEnd: dateMatch[2] };
+            } else {
+              console.warn(`Gojek Overview rejected: expected a 30-day range but received ${dateMatch[1]} to ${dateMatch[2]} (${periodDays} days)`);
+            }
           }
         }
         if (!overview) console.warn("Gojek Overview earnings or period not readable; retaining driver sync only.");
