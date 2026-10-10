@@ -83,8 +83,10 @@ export async function runFleetGroupReportSweep() {
         INSERT INTO public.fleet_group_report_log(report_key,status)
         VALUES($1,'sending')
         ON CONFLICT (report_key) DO UPDATE SET status='sending',error=NULL,updated_at=NOW()
-        WHERE fleet_group_report_log.status='failed'
-          AND fleet_group_report_log.updated_at < NOW()-INTERVAL '15 minutes'
+        WHERE (fleet_group_report_log.status='failed'
+           AND fleet_group_report_log.updated_at < NOW()-INTERVAL '15 minutes')
+           OR (fleet_group_report_log.status='sending'
+           AND fleet_group_report_log.updated_at < NOW()-INTERVAL '15 minutes')
         RETURNING report_key
       `,[report.key]);
       if (!claim.rowCount) continue;
