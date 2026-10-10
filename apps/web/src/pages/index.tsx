@@ -396,7 +396,7 @@ export default function FleetIntelligenceDashboard() {
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
                   {gojekOverview
-                    ? `Periode tersimpan Gojek: ${gojekOverview.periodStart} s.d. ${gojekOverview.periodEnd} · diperbarui ${new Date(gojekOverview.capturedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB`
+                    ? `Periode tersimpan Gojek: ${new Date(gojekOverview.periodStart + 'T00:00:00Z').toLocaleDateString('id-ID', { timeZone: 'UTC', day: 'numeric', month: 'short' })} – ${new Date(gojekOverview.periodEnd + 'T00:00:00Z').toLocaleDateString('id-ID', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' })} · diperbarui ${new Date(gojekOverview.capturedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB`
                     : "Nilai diambil dari halaman Overview pada sinkronisasi driver Gojek berikutnya."}
                 </div>
                 {!overviewPeriodValid && gojekOverview && <div className="text-xs text-amber-300 mt-1">Data Overview tidak berakhir pada tanggal hari ini (WIB). Nominal lama tidak ditampilkan sebagai angka terkini; lakukan sinkronisasi Gojek terbaru.</div>}
