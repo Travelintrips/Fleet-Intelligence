@@ -23,14 +23,29 @@ const tick = async () => {
   if (running) return;
   running = true;
   try {
-    const scheduledSync = await runFleetGojekScheduledSyncSweep();
-    if (scheduledSync.length) logger.info({ scheduledSync }, "Gojek daily sync jobs queued");
-    const [reminders, alerts] = await Promise.all([
-      runFleetAutoReminderSweep(),
-      runFleetAlertSweep(),
-    ]);
-    if (reminders.length) logger.info({ result: reminders }, "Fleet WA reminder sweep completed");
-    if (alerts.length) logger.info({ result: alerts }, "Fleet alert sweep completed");
+    // Isolate each maintenance task: a transient failure in one subsystem must
+    // not prevent reminders or alerts from running on their established schedule.
+    const jobs = [
+      { name: "gojek-schedule", run: async () => {
+        const scheduledSync = await runFleetGojekScheduledSyncSweep();
+        if (scheduledSync.length) logger.info({ scheduledSync }, "Gojek daily sync jobs queued");
+      } },
+      { name: "wa-reminders", run: async () => {
+        const reminders = await runFleetAutoReminderSweep();
+        if (reminders.length) logger.info({ result: reminders }, "Fleet WA reminder sweep completed");
+      } },
+      { name: "alerts", run: async () => {
+        const alerts = await runFleetAlertSweep();
+        if (alerts.length) logger.info({ result: alerts }, "Fleet alert sweep completed");
+      } },
+    ];
+    for (const job of jobs) {
+      try {
+        await job.run();
+      } catch (error) {
+        logger.error({ error, job: job.name }, "Fleet background task failed");
+      }
+    }
   } catch (error) {
     logger.error({ error }, "Fleet background sweep failed");
   } finally {
