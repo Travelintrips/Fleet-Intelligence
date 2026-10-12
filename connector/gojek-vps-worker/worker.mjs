@@ -123,7 +123,7 @@ async function syncJob(payload) {
 
     await loginIfNeeded(page, credentials);
 
-    if (!page.url().includes(transactionJob ? "/transactions" : "/drivers")) {
+    if (!page.url().includes("/drivers")) {
       await page.goto(`${portalUrl}${exportPath}`, {
         waitUntil: "domcontentloaded",
         timeout: 45_000,
