@@ -222,7 +222,7 @@ function buildTemplate(name: string, plate: string, phone: string, amount: strin
 
 const BULK_HINT = buildTemplate("{nama}", "{plat}", "{hp}", "{jumlah}");
 
-type WaPreview = { id: number; phone: string; name: string; message: string; defaultMessage: string };
+type WaPreview = { id: number; phone: string; originalPhone: string; useOtherPhone: boolean; name: string; message: string; defaultMessage: string };
 
 const SEND_TYPE_LABEL: Record<string, string> = {
   manual: "Manual", bulk: "Bulk", auto_daily: "Otomatis (1×/hari)", auto_3x: "Otomatis (3×/hari)",
@@ -572,22 +572,30 @@ export default function FleetOutstandingPage() {
     const plate  = String(o.vehicle_plate ?? "-");
     const amount = fmtIdr(o.outstanding_amount);
     const msg    = buildTemplate(name, plate, phone, amount);
-    setWaPreview({ id: Number(o.id), phone, name, message: msg, defaultMessage: msg });
+    setWaPreview({ id: Number(o.id), phone, originalPhone: phone, useOtherPhone: false, name, message: msg, defaultMessage: msg });
   }
+
+  const normalizedTarget = (value: string) => {
+    const digits = value.replace(/[\s()+-]/g, "");
+    const international = digits.startsWith("0") ? "62" + digits.slice(1) : digits;
+    return /^62[1-9]\d{7,12}$/.test(international) ? international : null;
+  };
 
   async function sendWa() {
     if (!waPreview) return;
+    const target = normalizedTarget(waPreview.phone);
+    if (!target) { toast.error("Nomor tujuan tidak valid. Gunakan 08... atau 62..."); return; }
     setWaSending(true);
     try {
       const res = await fetch(`/api/logistics/fleet/outstanding/${waPreview.id}/wa`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: waPreview.phone, message: waPreview.message }),
+        body: JSON.stringify({ phone: target, message: waPreview.message }),
       });
       const json = await res.json().catch(() => ({})) as { sent?: number; failed?: number; error?: string };
       if (!res.ok) throw new Error(json.error ?? "Gagal kirim WA");
       if ((json.sent ?? 0) < 1) throw new Error(json.error ?? "WA belum terkirim. Periksa status device Fleet.");
-      toast.success(`WA berhasil dikirim ke ${waPreview.name}`);
+      toast.success(`WA dikirim ke ${target} untuk ${waPreview.name}`);
       setWaPreview(null);
       qc.invalidateQueries({ queryKey: ["fleet-outstanding"] });
       qc.invalidateQueries({ queryKey: ["fleet-wa-logs"] });
@@ -1483,18 +1491,30 @@ export default function FleetOutstandingPage() {
             </DialogHeader>
             <div className="space-y-3">
               <div>
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <Label className="text-slate-300 text-sm">Nomor WhatsApp tujuan</Label>
-                  <span className="text-[11px] text-slate-500">Master: {waPreview.phone || "belum tersedia"}</span>
+                <Label className="text-slate-300 text-sm">Nomor WhatsApp tujuan</Label>
+                <div className="mt-2 flex gap-4 text-sm text-slate-200">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={!waPreview.useOtherPhone}
+                      onChange={() => setWaPreview({ ...waPreview, useOtherPhone: false, phone: waPreview.originalPhone })} />
+                    Nomor terdaftar
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={waPreview.useOtherPhone}
+                      onChange={() => setWaPreview({ ...waPreview, useOtherPhone: true, phone: "" })} />
+                    Nomor lain
+                  </label>
                 </div>
-                <Input
-                  value={waPreview.phone}
-                  onChange={(e) => setWaPreview({ ...waPreview, phone: e.target.value })}
-                  placeholder="Contoh: 081234567890 atau 6281234567890"
-                  inputMode="tel"
-                  className="bg-slate-900 border-slate-600 text-white"
-                />
-                <p className="mt-1 text-[11px] text-slate-500">Gunakan nomor WA aktif driver. Sistem akan menormalisasi format nomor saat dikirim.</p>
+                <p className="mt-1 text-xs text-slate-400">Nomor asli driver: {waPreview.originalPhone || "belum tersedia"}</p>
+                {waPreview.useOtherPhone && (
+                  <Input value={waPreview.phone}
+                    onChange={(e) => setWaPreview({ ...waPreview, phone: e.target.value })}
+                    placeholder="081234567890 atau 6281234567890" inputMode="tel"
+                    className="mt-2 bg-slate-900 border-slate-600 text-white" />
+                )}
+                <p className="mt-1 text-[11px] text-slate-500">Nomor alternatif hanya untuk pesan manual ini; data driver dan pengiriman otomatis tidak berubah.</p>
+                {waPreview.useOtherPhone && waPreview.phone.trim() && !normalizedTarget(waPreview.phone) && (
+                  <p className="text-xs text-red-400">Nomor tidak valid. Masukkan nomor Indonesia aktif dengan awalan 08 atau 62.</p>
+                )}
               </div>
               <div className="flex items-center justify-between">
                 <Label className="text-slate-300 text-sm">Pesan WhatsApp</Label>
@@ -1514,7 +1534,7 @@ export default function FleetOutstandingPage() {
               <div className="flex gap-3 pt-1">
                 <Button variant="outline" className="flex-1 border-slate-600" onClick={() => setWaPreview(null)}>Batal</Button>
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 gap-2"
-                  disabled={waSending || !waPreview.phone.trim() || !waPreview.message.trim() || !waReady} onClick={sendWa}>
+                  disabled={waSending || !normalizedTarget(waPreview.phone) || !waPreview.message.trim() || !waReady} onClick={sendWa}>
                   <Send className="w-4 h-4" />
                   {waSending ? "Mengirim..." : "Kirim WA"}
                 </Button>
