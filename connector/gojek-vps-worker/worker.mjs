@@ -12,6 +12,9 @@ const PORT = Number(process.env.PORT ?? 8080);
 
 const privateKey = createPrivateKey(await readFile(PRIVATE_KEY_PATH, "utf8"));
 let busy = false;
+let polling = false;
+let failureCount = 0;
+let nextPollAfter = 0;
 let last = null;
 
 function signedHeaders(method, canonicalPath, body) {
@@ -244,9 +247,12 @@ async function syncJob(payload) {
 }
 
 async function tick() {
-  if (busy) return;
+  if (busy || polling || Date.now() < nextPollAfter) return;
+  polling = true;
   try {
     const claim = await post("/gojek-connector/worker/claim", { version: VERSION });
+    failureCount = 0;
+    nextPollAfter = 0;
     if (!claim.job) {
       last = { at: new Date().toISOString(), status: "idle" };
       return;
@@ -270,7 +276,12 @@ async function tick() {
   } catch (error) {
     const status = error?.status;
     const message = error instanceof Error ? error.message : String(error);
-    last = { at: new Date().toISOString(), status: "poll-error", httpStatus: status, error: message };
+    // Back off transient CDN/auth failures to prevent overlapping claims and request storms.
+    failureCount = Math.min(failureCount + 1, 6);
+    nextPollAfter = Date.now() + Math.min(60000, 5000 * (2 ** (failureCount - 1)));
+    last = { at: new Date().toISOString(), status: "poll-error", httpStatus: status, error: message, retryAfter: new Date(nextPollAfter).toISOString() };
+  } finally {
+    polling = false;
   }
 }
 
