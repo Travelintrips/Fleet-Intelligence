@@ -49,9 +49,10 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain('CSV memiliki kutip yang tidak tertutup.');
   });
 
-  it("uses the strictly above Rp50k WA reminder threshold", () => {
+  it("includes drivers with outstanding at least Rp50k for WA reminders", () => {
     const reminder = readFileSync(resolve(process.cwd(), "src/lib/fleet-wa-reminder.ts"), "utf8");
-    expect(reminder).toContain("o.outstanding_amount > $3");
+    expect(reminder).toContain("const minOutstanding = Math.max(50_000, Number(args.minOutstanding) || 0)");
+    expect(reminder).toContain("o.outstanding_amount >= $2");
   });
 
   it("provides a guarded WhatsApp integration test endpoint", () => {
@@ -69,7 +70,7 @@ describe("Fleet production hardening contract", () => {
 
   it("keeps failed auto reminders eligible for safe retry", () => {
     const reminder = readFileSync(resolve(process.cwd(), "src/lib/fleet-wa-reminder.ts"), "utf8");
-    expect(reminder).toContain("retryBackoffMs = 30 * 60 * 1000");
+    expect(reminder).toContain("5 * 60 * 1000 : 30 * 60 * 1000");
     expect(reminder).toContain("getFleetWaGatewayStatus()");
     expect(reminder).toContain("SET auto_blast_last_run=NULL");
   });
@@ -91,7 +92,8 @@ describe("Fleet production hardening contract", () => {
     expect(alertEngine).toContain("outstanding_high");
     expect(alertEngine).toContain("driver_inactive");
     expect(alertEngine).toContain("revenue_drop");
-    expect(alertEngine).toContain("outstanding_amount >= 500000");
+    expect(alertEngine).toContain("outstanding_amount >= 50000");
+    expect(alertEngine).toContain("outstanding_amount >= 1000000");
     expect(alertEngine).toContain("last_active_date <= CURRENT_DATE - 7");
     expect(alertEngine).toContain("dropPct > 15");
     expect(alertEngine).toContain("auto_resolved_at=now()");
@@ -99,12 +101,12 @@ describe("Fleet production hardening contract", () => {
     expect(serverEntry).toContain("runFleetAlertSweep()");
   });
 
-  it("proxies Gojek server connector status and drivers sync without exposing service token", () => {
+  it("exposes heartbeat-backed Gojek connector status and queues driver sync", () => {
     expect(route).toContain('router.get("/gojek-connector/server-status"');
     expect(route).toContain('router.post("/gojek-connector/server-sync/drivers"');
-    expect(route).toContain("GOJEK_SERVER_CONNECTOR_URL");
-    expect(route).toContain("GOJEK_SERVER_CONNECTOR_TOKEN");
-    expect(route).toContain("Authorization:");
+    expect(route).toContain("getGojekServerConnectorHealth()");
+    expect(route).toContain("fleet_gojek_connector_workers");
+    expect(route).toContain("fleet_gojek_sync_jobs");
   });
 
   it("provides a non-mutating authenticated Gojek connector dry-run", () => {
