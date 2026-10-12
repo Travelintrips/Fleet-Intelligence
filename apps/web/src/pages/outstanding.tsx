@@ -1493,16 +1493,16 @@ export default function FleetOutstandingPage() {
               <div>
                 <Label className="text-slate-300 text-sm">Nomor WhatsApp tujuan</Label>
                 <div className="mt-2 flex gap-4 text-sm text-slate-200">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" checked={!waPreview.useOtherPhone}
-                      onChange={() => setWaPreview({ ...waPreview, useOtherPhone: false, phone: waPreview.originalPhone })} />
+                  <button type="button" aria-pressed={!waPreview.useOtherPhone}
+                    className={`rounded-md border px-3 py-2 text-xs transition-colors ${!waPreview.useOtherPhone ? "border-emerald-500 bg-emerald-900/30 text-emerald-200" : "border-slate-600 text-slate-300"}`}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setWaPreview((current) => current ? { ...current, useOtherPhone: false, phone: current.originalPhone } : null); }}>
                     Nomor terdaftar
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" checked={waPreview.useOtherPhone}
-                      onChange={() => setWaPreview({ ...waPreview, useOtherPhone: true, phone: "" })} />
+                  </button>
+                  <button type="button" aria-pressed={waPreview.useOtherPhone}
+                    className={`rounded-md border px-3 py-2 text-xs transition-colors ${waPreview.useOtherPhone ? "border-emerald-500 bg-emerald-900/30 text-emerald-200" : "border-slate-600 text-slate-300"}`}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setWaPreview((current) => current ? { ...current, useOtherPhone: true, phone: current.useOtherPhone ? current.phone : "" } : null); }}>
                     Nomor lain
-                  </label>
+                  </button>
                 </div>
                 <p className="mt-1 text-xs text-slate-400">Nomor asli driver: {waPreview.originalPhone || "belum tersedia"}</p>
                 {waPreview.useOtherPhone && (
