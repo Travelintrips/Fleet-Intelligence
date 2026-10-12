@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { pool } from "./db";
 import { getFleetWaGatewayStatus, normalizeFleetPhone, sendFleetWa } from "./wa-gateway-client";
 
@@ -201,11 +202,23 @@ export async function sendFleetOutstandingReminders(args: {
   const allowOverrides = ids.length === 1;
 
   for (const row of result.rows) {
-    if (row.suppressed && !args.oneTimeResendId) {
+    const phone = normalizeFleetPhone(allowOverrides ? (args.phoneOverride ?? row.driver_phone) : row.driver_phone);
+    // Single manual sends to an alternative phone should not be blocked by a
+    // previous send to the registered driver; retain per-recipient suppression.
+    let suppressed = row.suppressed;
+    if (allowOverrides && args.phoneOverride && phone && phone !== normalizeFleetPhone(row.driver_phone)) {
+      const previous = await pool.query(
+        `SELECT 1 FROM public.fleet_wa_logs WHERE company_id=$1 AND outstanding_id=$2
+          AND driver_phone=$3 AND status='sent'
+          AND (sent_at AT TIME ZONE 'Asia/Jakarta')::date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date LIMIT 1`,
+        [companyId, row.id, phone],
+      );
+      suppressed = previous.rowCount !== 0;
+    }
+    if (suppressed && !args.oneTimeResendId) {
       skippedSuppressed += 1;
       continue;
     }
-    const phone = normalizeFleetPhone(allowOverrides ? (args.phoneOverride ?? row.driver_phone) : row.driver_phone);
     if (!phone) {
       skippedNoPhone += 1;
       continue;
@@ -217,7 +230,7 @@ export async function sendFleetOutstandingReminders(args: {
       const provider = await sendFleetWa({
         phone,
         message,
-        idempotencyKey: args.oneTimeResendId ? `fleet-wa:one-time:${args.oneTimeResendId}:${row.id}` : `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
+        idempotencyKey: args.oneTimeResendId ? `fleet-wa:one-time:${args.oneTimeResendId}:${row.id}` : allowOverrides && args.phoneOverride ? `fleet-wa:${companyId}:${row.id}:selected:${createHash("sha256").update(phone + "\\n" + message).digest("hex").slice(0, 18)}:${new Date().toISOString().slice(0, 13)}` : `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
       });
       senderDevice = provider.senderDevice ?? senderDevice;
       deviceStatus = provider.deviceStatus ?? deviceStatus;
