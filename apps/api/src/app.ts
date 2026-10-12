@@ -41,8 +41,21 @@ app.use("/api", router);
 if (isProduction) {
   const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.resolve(runtimeDir, "public");
-  app.use(express.static(publicDir, { index: false, maxAge: "1h" }));
+  // Fingerprinted assets are immutable; HTML must not stay cached across deploys.
+  app.use("/assets", express.static(path.join(publicDir, "assets"), {
+    index: false, immutable: true, maxAge: "1y", fallthrough: false,
+  }));
+  app.use(express.static(publicDir, { index: false, maxAge: 0, setHeaders(res, filePath) {
+    if (filePath.endsWith(".html") || filePath.endsWith("deploy-version.json")) {
+      res.setHeader("Cache-Control", "no-store");
+    }
+  } }));
+  // Missing JS/CSS/images must never receive the SPA HTML fallback.
+  app.get(/^\/(?:assets\/.*|.*\.(?:js|mjs|css|map|wasm|json|png|jpe?g|svg|ico|webp|woff2?|ttf))$/i, (_req, res) => {
+    res.status(404).type("text/plain").send("Asset not found");
+  });
   app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     res.sendFile(path.join(publicDir, "index.html"));
   });
 }
