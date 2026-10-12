@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   AlertTriangle, CheckCircle, DollarSign, Wrench, RefreshCw,
@@ -1479,7 +1480,7 @@ export default function FleetOutstandingPage() {
       {/* ── Modal: Preview & Edit WA per-driver ──────────────────────── */}
       {waPreview && (
         <Dialog open onOpenChange={() => setWaPreview(null)}>
-          <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-lg">
+          <DialogContent className="bg-slate-800 border-slate-700 text-white w-[calc(100vw-1.5rem)] max-w-lg max-h-[calc(100dvh-1.5rem)] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <MessageCircle className="w-5 h-5 text-green-400" />
@@ -1492,7 +1493,7 @@ export default function FleetOutstandingPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-slate-300 text-sm">Nomor WhatsApp tujuan</Label>
-                <div className="mt-2 flex gap-4 text-sm text-slate-200">
+                <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-200">
                   <button type="button" aria-pressed={!waPreview.useOtherPhone}
                     className={`rounded-md border px-3 py-2 text-xs transition-colors ${!waPreview.useOtherPhone ? "border-emerald-500 bg-emerald-900/30 text-emerald-200" : "border-slate-600 text-slate-300"}`}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setWaPreview((current) => current ? { ...current, useOtherPhone: false, phone: current.originalPhone } : null); }}>
@@ -1527,8 +1528,8 @@ export default function FleetOutstandingPage() {
               <Textarea
                 value={waPreview.message}
                 onChange={(e) => setWaPreview({ ...waPreview, message: e.target.value })}
-                className="bg-slate-900 border-slate-600 text-white resize-none font-mono text-xs leading-relaxed"
-                rows={17}
+                className="bg-slate-900 border-slate-600 text-white resize-y font-mono text-xs leading-relaxed min-h-[180px] max-h-[45dvh]"
+                rows={10}
               />
               <p className="text-slate-500 text-xs">Teks <code className="bg-slate-700 px-1 rounded">*bintang*</code> tampil <strong>bold</strong> di WhatsApp.</p>
               <div className="flex gap-3 pt-1">

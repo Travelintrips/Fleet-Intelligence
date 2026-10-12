@@ -156,7 +156,7 @@ export default function GojekConnectorPage() {
               <RefreshCw className={`h-4 w-4 ${syncDrivers.isPending ? "animate-spin" : ""}`} />
               {syncDrivers.isPending ? "Sync Berjalan..." : "Sync Drivers dari Gojek"}
             </Button>
-            <Button variant="outline" className="gap-2" disabled={!data?.portalUrl} onClick={() => window.open(data.portalUrl, "_blank", "noopener,noreferrer")}>
+            <Button variant="outline" className="gap-2" disabled={!data?.portalUrl} onClick={() => { if (data?.portalUrl) window.open(data.portalUrl, "_blank", "noopener,noreferrer"); }}>
               <ExternalLink className="h-4 w-4" /> Buka Fleet Partner
             </Button>
           </div>
