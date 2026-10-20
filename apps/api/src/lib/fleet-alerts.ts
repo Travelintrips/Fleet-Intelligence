@@ -144,7 +144,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
          false,
          now()
        FROM public.fleet_drivers d
-       WHERE d.company_id=$1::text
+       WHERE d.company_id=$2
          AND d.status='active'
          AND COALESCE(d.source_present_in_latest_snapshot,true)=true
          AND d.last_active_date IS NOT NULL
@@ -155,7 +155,7 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
            AND reference_id IS NOT NULL
        DO UPDATE SET title=EXCLUDED.title,message=EXCLUDED.message,driver_id=EXCLUDED.driver_id
        RETURNING id`,
-      [companyId],
+      [companyId, String(companyId)],
     );
     inactiveCount = inactive.rowCount ?? 0;
 
@@ -168,14 +168,14 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
           AND NOT EXISTS (
             SELECT 1
               FROM public.fleet_drivers d
-             WHERE d.company_id=$1::text
+             WHERE d.company_id=$2
                AND d.id::text=a.reference_id
                AND d.status='active'
                AND COALESCE(d.source_present_in_latest_snapshot,true)=true
                AND d.last_active_date IS NOT NULL
                AND d.last_active_date <= CURRENT_DATE - 7
           )`,
-      [companyId],
+      [companyId, String(companyId)],
     );
     resolved += resolvedInactive.rowCount ?? 0;
   }
