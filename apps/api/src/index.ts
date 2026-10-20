@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { pool } from "./lib/db";
 import { runFleetAutoReminderSweep, runFleetOneTimeResend } from "./lib/fleet-wa-reminder";
 import { runFleetAlertSweep } from "./lib/fleet-alerts";
 import { runFleetGojekScheduledSyncSweep } from "./lib/fleet-gojek-scheduler";
@@ -53,21 +54,84 @@ const tick = async () => {
   }
 };
 
-const timer = setInterval(() => void tick(), 5 * 60 * 1000);
-timer.unref();
-setTimeout(() => void tick(), 20_000).unref();
+let maintenanceTimer: NodeJS.Timeout | null = null;
+let resendTimer: NodeJS.Timeout | null = null;
+let reportTimer: NodeJS.Timeout | null = null;
+let backgroundLeaderClient: Awaited<ReturnType<typeof pool.connect>> | null = null;
+let acquiringBackgroundLeadership = false;
 
-const runResend = () => void runFleetOneTimeResend().catch(error => logger.error({error}, "Fleet one-time resend failed"));
-const resendTimer = setInterval(runResend, 60 * 1000);
-resendTimer.unref();
-setTimeout(runResend, 25_000).unref();
+const stopBackgroundJobs = () => {
+  if (maintenanceTimer) clearInterval(maintenanceTimer);
+  if (resendTimer) clearInterval(resendTimer);
+  if (reportTimer) clearInterval(reportTimer);
+  maintenanceTimer = null;
+  resendTimer = null;
+  reportTimer = null;
+};
 
-const runGroupReport = () => void runFleetGroupReportSweep().catch(error => logger.error({error}, "Fleet group report failed"));
-const reportTimer = setInterval(runGroupReport, 5 * 60 * 1000);
-reportTimer.unref();
-setTimeout(runGroupReport, 35_000).unref();
+const startBackgroundJobs = () => {
+  if (maintenanceTimer || resendTimer || reportTimer) return;
 
-const stop = () => { clearInterval(timer); clearInterval(reportTimer); clearInterval(resendTimer); };
+  maintenanceTimer = setInterval(() => void tick(), 5 * 60 * 1000);
+  maintenanceTimer.unref();
+  setTimeout(() => void tick(), 20_000).unref();
+
+  const runResend = () => void runFleetOneTimeResend().catch(error => logger.error({ error }, "Fleet one-time resend failed"));
+  resendTimer = setInterval(runResend, 60 * 1000);
+  resendTimer.unref();
+  setTimeout(runResend, 25_000).unref();
+
+  const runGroupReport = () => void runFleetGroupReportSweep().catch(error => logger.error({ error }, "Fleet group report failed"));
+  reportTimer = setInterval(runGroupReport, 5 * 60 * 1000);
+  reportTimer.unref();
+  setTimeout(runGroupReport, 35_000).unref();
+};
+
+const tryBecomeBackgroundLeader = async () => {
+  if (backgroundLeaderClient || acquiringBackgroundLeadership) return;
+  acquiringBackgroundLeadership = true;
+  const client = await pool.connect();
+  try {
+    const result = await client.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtext('fleet_background_leader')) AS acquired",
+    );
+    if (!result.rows[0]?.acquired) {
+      client.release();
+      return;
+    }
+
+    backgroundLeaderClient = client;
+    client.on("error", (error) => {
+      logger.error({ error }, "Fleet background leader DB connection lost");
+      if (backgroundLeaderClient === client) backgroundLeaderClient = null;
+      stopBackgroundJobs();
+    });
+    logger.info("Fleet background leadership acquired");
+    startBackgroundJobs();
+  } catch (error) {
+    client.release();
+    logger.error({ error }, "Fleet background leadership check failed");
+  } finally {
+    acquiringBackgroundLeadership = false;
+  }
+};
+
+const leaderRetryTimer = setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
+leaderRetryTimer.unref();
+setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+
+const stop = () => {
+  clearInterval(leaderRetryTimer);
+  stopBackgroundJobs();
+  const client = backgroundLeaderClient;
+  backgroundLeaderClient = null;
+  if (client) {
+    void client
+      .query("SELECT pg_advisory_unlock(hashtext('fleet_background_leader'))")
+      .catch(error => logger.warn({ error }, "Fleet background leadership unlock failed"))
+      .finally(() => client.release());
+  }
+};
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 server.on("error", (error) => {
