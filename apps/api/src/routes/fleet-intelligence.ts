@@ -192,11 +192,27 @@ router.post("/gojek-connector/worker/claim", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // A stale claim can be retried at most twice. Keep the same job ID and
+    // preserve the audit trail instead of creating a duplicate sync request.
     await client.query(
       `UPDATE public.fleet_gojek_sync_jobs
-          SET status='pending', worker_id=NULL, started_at=NULL,
-              heartbeat_at=NULL, updated_at=NOW(),
-              error=COALESCE(error,'') || CASE WHEN COALESCE(error,'')='' THEN '' ELSE E'\\n' END || 'Recovered stale running job'
+          SET status=CASE
+                WHEN (length(COALESCE(error,'')) -
+                      length(replace(COALESCE(error,''),'Recovered stale running job','')))
+                     / length('Recovered stale running job') >= 2
+                THEN 'failed' ELSE 'pending' END,
+              worker_id=NULL, started_at=NULL, heartbeat_at=NULL,
+              finished_at=CASE
+                WHEN (length(COALESCE(error,'')) -
+                      length(replace(COALESCE(error,''),'Recovered stale running job','')))
+                     / length('Recovered stale running job') >= 2
+                THEN NOW() ELSE NULL END,
+              updated_at=NOW(),
+              error=concat_ws(E'\\n', NULLIF(error,''), 'Recovered stale running job',
+                CASE WHEN (length(COALESCE(error,'')) -
+                     length(replace(COALESCE(error,''),'Recovered stale running job','')))
+                    / length('Recovered stale running job') >= 2
+                THEN 'RETRY_EXHAUSTED: manual review required' END)
         WHERE status='running'
           AND COALESCE(heartbeat_at,started_at,requested_at) < NOW() - INTERVAL '10 minutes'`,
     );
