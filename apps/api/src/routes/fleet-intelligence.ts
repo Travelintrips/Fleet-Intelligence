@@ -33,7 +33,9 @@ async function getGojekServerConnectorHealth() {
   );
   const row = worker.rows[0] ?? null;
   const heartbeatAt = row?.heartbeat_at ? new Date(row.heartbeat_at).getTime() : 0;
-  const healthy = Boolean(row && Date.now() - heartbeatAt <= 30_000);
+  // The VPS worker backs off idle polling to 60 seconds; allow two idle cycles
+  // before reporting it offline to avoid false negatives between heartbeats.
+  const healthy = Boolean(row && heartbeatAt > 0 && Date.now() - heartbeatAt >= 0 && Date.now() - heartbeatAt <= 120_000);
   return {
     configured: true,
     healthy,
