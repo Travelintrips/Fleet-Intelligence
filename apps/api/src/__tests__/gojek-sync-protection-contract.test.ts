@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Source-level regression tests: these do NOT replace DB concurrency/E2E tests.
+const reminder = readFileSync(fileURLToPath(new URL("../lib/fleet-wa-reminder.ts", import.meta.url)), "utf8");
+const alerts = readFileSync(fileURLToPath(new URL("../lib/fleet-alerts.ts", import.meta.url)), "utf8");
 const route = readFileSync(fileURLToPath(new URL("../routes/fleet-intelligence.ts", import.meta.url)), "utf8");
 const claim = route.split('router.post("/gojek-connector/worker/claim"')[1]?.split('router.post("/gojek-connector/worker/handoff"')[0] ?? "";
 const handoff = route.split('router.post("/gojek-connector/worker/handoff"')[1]?.split('router.post("/gojek-connector/worker/fail"')[0] ?? "";
@@ -25,6 +27,15 @@ describe("Gojek sync safety contracts", () => {
   it("refuses handoff for jobs not running on the authenticated worker", () => {
     expect(handoff).toContain("AND worker_id=$2");
     expect(handoff).toContain('row.status !== "running"');
+  });
+  it("holds automatic WA unless today\'s scheduled driver snapshot succeeded", () => {
+    expect(reminder).toContain("fleet-scheduler-0100-wib:");
+    expect(reminder).toContain("Reminder ditunda: sinkronisasi Gojek hari ini belum berhasil");
+  });
+  it("creates one deduplicated admin alert for missing or failed daily sync", () => {
+    expect(alerts).toContain("gojek_sync_failed");
+    expect(alerts).toContain("ON CONFLICT (company_id,alert_type,reference_type,reference_id)");
+    expect(alerts).toContain("auto_resolved_at=now()");
   });
   it("exposes explicit sync failure and WA hold diagnostics", () => {
     expect(route).toContain("waHoldReason");
