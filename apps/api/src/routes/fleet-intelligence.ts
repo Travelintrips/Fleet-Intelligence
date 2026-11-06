@@ -1463,7 +1463,25 @@ router.get("/gojek-connector/status", async (req: AdminRequest, res) => {
     companyId(req);
     const cfg = getGojekConnectorConfig();
     const serverConnector = await getGojekServerConnectorHealth();
+    const todayWib = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+    const scheduled = await pool.query(
+      "SELECT id,status,error,finished_at FROM public.fleet_gojek_sync_jobs WHERE company_id=$1 AND requested_by=$2 ORDER BY requested_at DESC LIMIT 1",
+      [companyId(req), "fleet-scheduler-0100-wib:" + todayWib],
+    );
+    const scheduledSync = scheduled.rows[0] ?? null;
+    const syncHealth = {
+      dateWib: todayWib,
+      status: scheduledSync?.status ?? "missing",
+      jobId: scheduledSync?.id ?? null,
+      error: scheduledSync?.error ?? null,
+      finishedAt: scheduledSync?.finished_at ?? null,
+      waAutoSendSafe: scheduledSync?.status === "succeeded",
+      waHoldReason: scheduledSync?.status === "succeeded" ? null
+        : scheduledSync?.status === "failed" ? "SYNC_FAILED"
+        : scheduledSync ? "SYNC_NOT_COMPLETED" : "SYNC_NOT_FOUND",
+    };
     res.json({
+      syncHealth,
       enabled: cfg.enabled,
       mode: cfg.mode,
       portalUrl: cfg.portalUrl,
