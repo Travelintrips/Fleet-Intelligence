@@ -309,6 +309,8 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
     return;
   }
 
+  const lockClient = await pool.connect();
+  let lockedJobId: string | null = null;
   try {
     const jobId = String(req.body?.jobId ?? "").trim();
     const fileName = String(req.body?.fileName ?? "gojek-export.csv").trim().slice(0,255);
@@ -317,6 +319,18 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
       res.status(400).json({ error: "jobId dan CSV wajib diisi." });
       return;
     }
+
+    // One in-flight handoff per job across API instances. Keep the lock on
+    // this dedicated connection until import and job finalization finish.
+    const lock = await lockClient.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired",
+      ["gojek-handoff:" + jobId],
+    );
+    if (!lock.rows[0]?.acquired) {
+      res.status(409).json({ error: "Impor untuk job ini sedang diproses." });
+      return;
+    }
+    lockedJobId = jobId;
 
     const job = await pool.query<{ company_id: number; status: string }>(
       `SELECT company_id,status
@@ -387,6 +401,11 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
   } catch (error) {
     req.log.error({ error }, "Gojek VPS worker handoff failed");
     res.status(500).json({ error: error instanceof Error ? error.message : "Worker handoff gagal." });
+  } finally {
+    if (lockedJobId) {
+      await lockClient.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", ["gojek-handoff:" + lockedJobId]).catch(() => undefined);
+    }
+    lockClient.release();
   }
 });
 
