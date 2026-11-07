@@ -12,6 +12,7 @@ const handoff = route.split('router.post("/gojek-connector/worker/handoff"')[1]?
 describe("Gojek sync safety contracts", () => {
   it("caps stale job recovery and records exhaustion", () => {
     expect(claim).toContain("RETRY_EXHAUSTED");
+    expect(claim).toContain("replace(COALESCE(error,''),'Recovered stale running job','')");
     expect(claim).toContain("Recovered stale running job");
     expect(claim).toContain("THEN 'failed' ELSE 'pending'");
   });
