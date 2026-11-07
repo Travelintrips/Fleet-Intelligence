@@ -37,6 +37,48 @@ export async function syncFleetAlertsForCompany(companyId: number): Promise<Aler
 
   let resolved = 0;
 
+  // Raise one actionable admin alert per company/day when the 01:00 driver
+  // snapshot fails or is still missing after 01:15 WIB. Never send driver WA
+  // from this alert path; use the existing Alerts dashboard and unique key.
+  const todayWib = new Date(Date.now() + 7 * 3600000);
+  const dateWib = todayWib.toISOString().slice(0, 10);
+  const afterGrace = todayWib.getUTCHours() > 1 ||
+    (todayWib.getUTCHours() === 1 && todayWib.getUTCMinutes() >= 15);
+  if (afterGrace) {
+    const job = await pool.query<{ status: string; error: string | null }>(
+      `SELECT status,error FROM public.fleet_gojek_sync_jobs
+       WHERE company_id=$1 AND requested_by=$2
+       ORDER BY requested_at DESC LIMIT 1`,
+      [companyId, `fleet-scheduler-0100-wib:${dateWib}`],
+    );
+    const current = job.rows[0] ?? null;
+    if (current?.status === "succeeded") {
+      const recovered = await pool.query(
+        `UPDATE public.fleet_alerts SET auto_resolved_at=now()
+         WHERE company_id=$1 AND alert_type='gojek_sync_failed'
+           AND reference_type='gojek_daily_sync' AND reference_id=$2
+           AND auto_resolved_at IS NULL`,
+        [companyId, dateWib],
+      );
+      resolved += recovered.rowCount ?? 0;
+    } else {
+      const reason = current?.status === "failed" ? "gagal"
+        : current ? "belum selesai" : "tidak ditemukan";
+      await pool.query(
+        `INSERT INTO public.fleet_alerts
+          (company_id,alert_type,severity,title,message,reference_type,reference_id,is_read,is_notified,created_at)
+         VALUES($1,'gojek_sync_failed','critical',$2,$3,'gojek_daily_sync',$4,false,false,now())
+         ON CONFLICT (company_id,alert_type,reference_type,reference_id)
+           WHERE auto_resolved_at IS NULL AND reference_type IS NOT NULL AND reference_id IS NOT NULL
+         DO UPDATE SET title=EXCLUDED.title,message=EXCLUDED.message`,
+        [companyId, "Sinkronisasi Gojek 01.00 bermasalah",
+         `Job ${dateWib} ${reason}. WA otomatis ditahan sampai snapshot driver berhasil.` +
+           (current?.error ? ` Error: ${current.error.slice(0, 350)}` : ""),
+         dateWib],
+      );
+    }
+  }
+
   const outstanding = await pool.query(
     `INSERT INTO public.fleet_alerts
       (company_id, alert_type, severity, title, message, reference_type, reference_id, driver_id, is_read, is_notified, created_at)

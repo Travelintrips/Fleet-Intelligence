@@ -318,10 +318,9 @@ export async function runFleetAutoReminderSweep(): Promise<FleetReminderSweepRes
     const freshSync = await pool.query<{ id: string }>(
       `SELECT id FROM public.fleet_gojek_sync_jobs
         WHERE company_id=$1 AND status='succeeded'
-          AND (finished_at AT TIME ZONE 'Asia/Jakarta')::date =
-              (NOW() AT TIME ZONE 'Asia/Jakarta')::date
+          AND requested_by=$2
         ORDER BY finished_at DESC LIMIT 1`,
-      [companyId],
+      [companyId, `fleet-scheduler-0100-wib:${dateWib}`],
     );
     if (!freshSync.rowCount) {
       await updateWorkerState(companyId, {
