@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { Router } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
@@ -311,6 +312,7 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
 
   const lockClient = await pool.connect();
   let lockedJobId: string | null = null;
+  let transactionOpen = false;
   try {
     const jobId = String(req.body?.jobId ?? "").trim();
     const fileName = String(req.body?.fileName ?? "gojek-export.csv").trim().slice(0,255);
@@ -332,11 +334,13 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
     }
     lockedJobId = jobId;
 
-    const job = await pool.query<{ company_id: number; status: string }>(
+    await lockClient.query("BEGIN");
+    transactionOpen = true;
+    const job = await lockClient.query<{ company_id: number; status: string }>(
       `SELECT company_id,status
          FROM public.fleet_gojek_sync_jobs
         WHERE id=$1 AND worker_id=$2
-        LIMIT 1`,
+        LIMIT 1 FOR UPDATE`,
       [jobId, auth.workerId],
     );
     const row = job.rows[0];
@@ -359,12 +363,14 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
           content,
           fileName,
           actor: `gojek-vps-worker:${auth.workerId}`,
+          client: lockClient,
         })
       : await importGojekConnectorCsv({
           companyId: Number(row.company_id),
           content,
           fileName,
           actor: `gojek-vps-worker:${auth.workerId}`,
+          client: lockClient,
         });
 
     // Optional read-only Overview data captured from the authenticated Gojek page.
@@ -382,14 +388,16 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
         overview = { netEarnings: amount, periodStart: from, periodEnd: to, capturedAt: new Date().toISOString() };
       }
     }
-    await pool.query(
+    const finalized = await lockClient.query(
       `UPDATE public.fleet_gojek_sync_jobs
           SET status='succeeded',finished_at=NOW(),heartbeat_at=NOW(),
               result=$2::jsonb,error=NULL,updated_at=NOW()
-        WHERE id=$1`,
-      [jobId, JSON.stringify({ exportType, ...result, ...(overview ? { overview } : {}) })],
+        WHERE id=$1 AND worker_id=$3 AND status='running'
+        RETURNING id`,
+      [jobId, JSON.stringify({ exportType, ...result, ...(overview ? { overview } : {}) }), auth.workerId],
     );
-    await pool.query(
+    if (finalized.rowCount !== 1) throw new Error("Job ownership changed before finalization");
+    await lockClient.query(
       `UPDATE public.fleet_gojek_connector_workers
           SET heartbeat_at=NOW(),last_job_id=$2,last_status='idle',
               last_error=NULL,updated_at=NOW()
@@ -397,11 +405,16 @@ router.post("/gojek-connector/worker/handoff", async (req, res) => {
       [auth.workerId, jobId],
     );
 
+    await lockClient.query("COMMIT");
+    transactionOpen = false;
     res.status(201).json({ ok: true, exportType, ...result });
   } catch (error) {
+    if (transactionOpen) await lockClient.query("ROLLBACK").catch(() => undefined);
+    transactionOpen = false;
     req.log.error({ error }, "Gojek VPS worker handoff failed");
     res.status(500).json({ error: error instanceof Error ? error.message : "Worker handoff gagal." });
   } finally {
+    if (transactionOpen) await lockClient.query("ROLLBACK").catch(() => undefined);
     if (lockedJobId) {
       await lockClient.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", ["gojek-handoff:" + lockedJobId]).catch(() => undefined);
     }
@@ -703,15 +716,16 @@ async function importGojekConnectorCsv(args: {
   content: string;
   fileName: string;
   actor: string;
+  client?: PoolClient;
 }) {
   const parsed = parseGojekTransactionCsv(args.content);
   const fileHash = createHash("sha256").update(args.content).digest("hex");
-  const client = await pool.connect();
+  const client = args.client ?? await pool.connect();
 
   try {
     // Transaction-scoped lock serializes imports of the same report hash.
     // Prevent concurrent handoffs racing past dedup before either commits.
-    await client.query("BEGIN");
+    if (!args.client) await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text),hashtext($2::text))",[
       "fleet-gojek-transactions:" + args.companyId, fileHash,
     ]);
@@ -818,7 +832,7 @@ async function importGojekConnectorCsv(args: {
       "UPDATE public.fleet_reports SET status=$2,processed_count=$3,error_count=$4,updated_at=NOW() WHERE id=$1",
       [reportId, status, successRows, failedRows],
     );
-    await client.query("COMMIT");
+    if (!args.client) await client.query("COMMIT");
 
     return {
       reportId,
@@ -831,10 +845,10 @@ async function importGojekConnectorCsv(args: {
       fileRetained: false,
     };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (!args.client) await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
-    client.release();
+    if (!args.client) client.release();
   }
 }
 
@@ -844,6 +858,7 @@ async function importDriverSnapshotConnectorCsv(args: {
   content: string;
   fileName: string;
   actor: string;
+  client?: PoolClient;
 }) {
   const rows = parseSnapshotCsv(args.content);
   const prepared = rows
@@ -874,7 +889,7 @@ async function importDriverSnapshotConnectorCsv(args: {
 
   if (!prepared.length) throw new Error("CSV Drivers tidak memiliki baris valid.");
 
-  const result = await pool.query<{ result: Record<string, unknown> }>(
+  const result = await (args.client ?? pool).query<{ result: Record<string, unknown> }>(
     `SELECT public.fleet_import_driver_snapshot($1,$2,$3,$4::jsonb) AS result`,
     [args.companyId, args.fileName, args.actor, JSON.stringify(prepared)],
   );

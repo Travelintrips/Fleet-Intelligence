@@ -37,6 +37,17 @@ describe("Gojek sync safety contracts", () => {
     expect(alerts).toContain("ON CONFLICT (company_id,alert_type,reference_type,reference_id)");
     expect(alerts).toContain("auto_resolved_at=now()");
   });
+  it("commits the import and job success on the same locked PostgreSQL connection", () => {
+    expect(handoff).toContain('await lockClient.query("BEGIN")');
+    expect(handoff).toContain('LIMIT 1 FOR UPDATE');
+    expect(handoff.match(/client: lockClient/g)?.length).toBe(2);
+    expect(handoff).toContain('await lockClient.query("COMMIT")');
+    expect(handoff).toContain('await lockClient.query("ROLLBACK")');
+    expect(handoff).toContain("finalized.rowCount !== 1");
+    expect(route).toContain('if (!args.client) await client.query("COMMIT")');
+    expect(route).toContain('if (!args.client) await client.query("ROLLBACK")');
+    expect(route).toContain('await (args.client ?? pool).query');
+  });
   it("exposes explicit sync failure and WA hold diagnostics", () => {
     expect(route).toContain("waHoldReason");
     expect(route).toContain("SYNC_FAILED");
