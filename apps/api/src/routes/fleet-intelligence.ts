@@ -1597,6 +1597,7 @@ router.post("/outstanding/:id/wa", async (req: AdminRequest, res) => {
       suppressHours:1,
       ids:[id],
       sendType:"selected",
+      manualRequestId:typeof req.body?.requestId==="string" && /^[0-9a-f-]{36}$/i.test(req.body.requestId) ? req.body.requestId : undefined,
       phoneOverride:typeof req.body?.phone==="string"?req.body.phone:undefined,
       messageOverride:typeof req.body?.message==="string"?req.body.message:undefined,
     });
