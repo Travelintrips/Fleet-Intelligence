@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "./db";
+import { fleetSendIdempotencyKey, shouldSuppressFleetSend } from "./fleet-wa-send-policy";
 import { getFleetWaGatewayStatus, normalizeFleetPhone, sendFleetWa } from "./wa-gateway-client";
 
 type ReminderRow = {
@@ -219,7 +220,7 @@ export async function sendFleetOutstandingReminders(args: {
       );
       suppressed = previous.rowCount !== 0;
     }
-    if (sendType === "auto" && suppressed && !args.oneTimeResendId) {
+    if (shouldSuppressFleetSend(sendType, suppressed, args.oneTimeResendId)) {
       skippedSuppressed += 1;
       continue;
     }
@@ -234,11 +235,11 @@ export async function sendFleetOutstandingReminders(args: {
       const provider = await sendFleetWa({
         phone,
         message,
-        idempotencyKey: args.oneTimeResendId
-          ? `fleet-wa:one-time:${args.oneTimeResendId}:${row.id}`
-          : sendType === "auto"
-            ? `fleet-wa:${companyId}:${row.id}:auto:${new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)}`
-            : `fleet-wa:${companyId}:${row.id}:${sendType}:${manualRequestId}`,
+        idempotencyKey: fleetSendIdempotencyKey({
+          companyId, outstandingId: row.id, sendType, manualRequestId,
+          oneTimeResendId: args.oneTimeResendId,
+          todayWib: new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10),
+        }),
       });
       senderDevice = provider.senderDevice ?? senderDevice;
       deviceStatus = provider.deviceStatus ?? deviceStatus;
