@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
-import { createDevAuthRouter } from "../routes/dev-auth";
+// Import the Fleet router only after a synthetic CST-DEV DB env is set.
 
 const ORIGIN = "https://dev-fleet.cstlogistic.co.id";
 const AUTH_ID = "2d504b60-9172-4a2d-910b-2d80d9214156";
@@ -20,6 +20,7 @@ const keys = [
   "APP_ENV", "NODE_ENV", "APP_BASE_URL", "SESSION_SECRET",
   "FLEET_DEV_GOOGLE_AUTH_ENABLED", "FLEET_DEV_SUPABASE_PUBLISHABLE_KEY",
   "FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID", "FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID",
+  "SUPABASE_DATABASE_URL_DEV",
 ] as const;
 const previous = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
 
@@ -47,6 +48,7 @@ describe("Fleet DEV Google SSO HTTP route E2E with MOCKED GoTrue only", () => {
       FLEET_DEV_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_mock_never_real",
       FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID: AUTH_ID,
       FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID: CANON,
+      SUPABASE_DATABASE_URL_DEV: "postgresql://postgres.xssrfshdrtdfupgqwfdw:fake@127.0.0.1:65432/fleet_dev_test",
     });
     let goTrueUser: object | null = user;
     let gotrueCalls = 0;
@@ -63,6 +65,7 @@ describe("Fleet DEV Google SSO HTTP route E2E with MOCKED GoTrue only", () => {
       return originalFetch(url, init);
     });
 
+    const { createDevAuthRouter } = await import("../routes/dev-auth");
     const app = express();
     app.set("trust proxy", 1);
     app.use(express.json());
