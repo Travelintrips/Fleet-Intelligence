@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import express from "express";
+import pinoHttp from "pino-http";
 import type { Server } from "node:http";
 
 vi.mock("../lib/db", () => ({
@@ -30,6 +31,7 @@ describe("CST DEV private Gojek CSV route: HTTP behavior without database writes
     const { default: router } = await import("../routes/fleet-intelligence");
     const app = express();
     app.use(express.json());
+    app.use(pinoHttp());
     app.use("/api/logistics/fleet", router);
     const server: Server = app.listen(0, "127.0.0.1");
     try {
