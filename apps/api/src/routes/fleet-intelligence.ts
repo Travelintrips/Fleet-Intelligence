@@ -2092,7 +2092,9 @@ router.get("/transactions", async (req: AdminRequest, res) => {
     const offset = (page - 1) * limit;
 
     const rows = await pool.query(
-      `SELECT *
+      `SELECT id,transaction_date,driver_name,vehicle_plate,service_type,
+              trip_count,gross_revenue,incentive,commission,deduction,net_revenue,
+              outstanding_balance,ppn_rate,ppn_amount,amount,transaction_type
          FROM public.fleet_transactions
         WHERE company_id=$1
           AND EXISTS (
