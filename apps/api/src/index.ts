@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { pool } from "./lib/db";
+import type { PoolClient } from "pg";
 import { runFleetAutoReminderSweep, runFleetOneTimeResend } from "./lib/fleet-wa-reminder";
 import { runFleetAlertSweep } from "./lib/fleet-alerts";
 import { runFleetGojekScheduledSyncSweep } from "./lib/fleet-gojek-scheduler";
@@ -57,7 +58,7 @@ const tick = async () => {
 let maintenanceTimer: NodeJS.Timeout | null = null;
 let resendTimer: NodeJS.Timeout | null = null;
 let reportTimer: NodeJS.Timeout | null = null;
-let backgroundLeaderClient: Awaited<ReturnType<typeof pool.connect>> | null = null;
+let backgroundLeaderClient: PoolClient | null = null;
 let acquiringBackgroundLeadership = false;
 
 const stopBackgroundJobs = () => {
@@ -116,12 +117,22 @@ const tryBecomeBackgroundLeader = async () => {
   }
 };
 
-const leaderRetryTimer = setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
-leaderRetryTimer.unref();
-setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+// DEV-only kill switch: keep Fleet API read routes available without ever
+// acquiring advisory leader locks or launching WA/Gojek/Finance background jobs.
+// PROD retains its existing scheduling behavior regardless of this flag.
+const backgroundSchedulerDisabled =
+  isDevelopmentEnvironment() && process.env.DISABLE_BACKGROUND_SCHEDULERS === "true";
+
+const leaderRetryTimer = backgroundSchedulerDisabled
+  ? null
+  : setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
+if (leaderRetryTimer) {
+  leaderRetryTimer.unref();
+  setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+}
 
 const stop = () => {
-  clearInterval(leaderRetryTimer);
+  if (leaderRetryTimer) clearInterval(leaderRetryTimer);
   stopBackgroundJobs();
   const client = backgroundLeaderClient;
   backgroundLeaderClient = null;

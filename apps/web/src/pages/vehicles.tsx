@@ -56,6 +56,9 @@ export default function FleetVehiclesPage() {
   const aktif    = vehicles.filter((v) => v.status === "active").length;
   const motor    = vehicles.filter((v) => String(v.vehicle_type ?? "motor") === "motor").length;
   const mobil    = vehicles.filter((v) => String(v.vehicle_type ?? "") === "car").length;
+  const evidenceComplete = vehicles.filter((v) => v.evidence_status === "corroborated").length;
+  const evidenceReview = vehicles.filter((v) => v.evidence_status === "review").length;
+  const evidenceUnknown = vehicles.filter((v) => v.evidence_status === "unknown").length;
 
   return (
     <AppShell>
@@ -73,6 +76,10 @@ export default function FleetVehiclesPage() {
           <div>
             <h1 className="text-2xl font-bold text-white">Kendaraan Fleet</h1>
             <p className="text-slate-400 text-sm mt-1">Data kendaraan dari armada &amp; CSV laporan Gojek</p>
+            <p className="text-amber-300/90 text-xs mt-1">
+              Status kendaraan Aktif hanya status master, bukan izin operasional/dispatch.
+              Bukti data diperiksa terpisah dari status driver dan transaksi.
+            </p>
           </div>
           <Button className="bg-blue-600 hover:bg-blue-700 gap-2" onClick={() => setOpen(true)}>
             <Plus className="w-4 h-4" /> Tambah Kendaraan
@@ -80,10 +87,12 @@ export default function FleetVehiclesPage() {
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           {[
             { label: "Total Kendaraan", value: total },
-            { label: "Aktif", value: aktif },
+            { label: "Aktif (Master)", value: aktif },
+            { label: "Bukti 4 Kriteria", value: evidenceComplete },
+            { label: "Perlu Tinjau", value: evidenceReview },
             { label: "Motor", value: motor },
             { label: "Mobil", value: mobil },
           ].map((s) => (
@@ -99,6 +108,13 @@ export default function FleetVehiclesPage() {
           ))}
         </div>
 
+        {evidenceUnknown > 0 && (
+          <p className="text-amber-300 text-xs">
+            {evidenceUnknown} kendaraan belum dapat diverifikasi karena data pendukung tidak tersedia.
+            Jumlah tersebut tidak dihitung sebagai bukti lengkap.
+          </p>
+        )}
+
         {/* Table */}
         <Card className="bg-slate-800/60 border-slate-700">
           <CardContent className="p-0">
@@ -106,7 +122,7 @@ export default function FleetVehiclesPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-700">
                   <tr>
-                    {["Plat", "Tipe", "Merk/Model", "Driver Terakhir", "Terakhir Aktif", "Transaksi", "Sumber", "Status"].map((h) => (
+                    {["Plat", "Tipe", "Merk/Model", "Driver Terakhir", "Status Driver", "Snapshot Gojek", "Transaksi Terakhir", "Transaksi", "Bukti Data", "Sumber", "Status Master"].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -115,14 +131,14 @@ export default function FleetVehiclesPage() {
                   {isLoading
                     ? Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="border-b border-slate-700/50">
-                          <td colSpan={8} className="px-4 py-3">
+                          <td colSpan={11} className="px-4 py-3">
                             <div className="h-4 bg-slate-700 rounded animate-pulse" />
                           </td>
                         </tr>
                       ))
                     : vehicles.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-16 text-center text-slate-500">
+                          <td colSpan={11} className="px-4 py-16 text-center text-slate-500">
                             <Car className="w-10 h-10 mx-auto mb-3 opacity-40" />
                             <p>Belum ada data kendaraan</p>
                             <p className="text-xs mt-1">Upload laporan CSV Gojek untuk mengisi data otomatis</p>
@@ -147,11 +163,44 @@ export default function FleetVehiclesPage() {
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap max-w-[140px] truncate">
                               {String(v.driver_name ?? "—")}
                             </td>
+                            <td className="px-4 py-3 text-xs whitespace-nowrap">
+                              <Badge className={
+                                v.driver_status === "active"
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-700/50 text-xs"
+                                  : "bg-amber-500/15 text-amber-300 border border-amber-700/50 text-xs"
+                              }>
+                                {v.driver_status === "active" ? "Aktif" :
+                                  v.driver_status === "suspended" ? "Suspended" :
+                                  v.driver_status === "inactive" ? "Tidak aktif" : "Tidak diketahui"}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-xs whitespace-nowrap">
+                              {v.snapshot_present === true ? "Tercatat" :
+                                v.snapshot_present === false ? "Tidak tercatat" : "Belum diketahui"}
+                            </td>
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-xs">
-                              {fmtDate(v.last_seen_date)}
+                              {fmtDate(v.last_transaction_date)}
                             </td>
                             <td className="px-4 py-3 text-slate-400 text-right tabular-nums">
                               {v.tx_count != null ? Number(v.tx_count).toLocaleString("id-ID") : "—"}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap" title={String(v.evidence_reason ?? "")}>
+                              <Badge className={
+                                v.evidence_status === "corroborated"
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-700/50 text-xs"
+                                  : "bg-amber-500/15 text-amber-300 border border-amber-700/50 text-xs"
+                              }>
+                                {v.evidence_status === "corroborated" ? "4 Bukti Cocok" :
+                                  v.evidence_status === "review" ? "Perlu Tinjau" : "Belum Terverifikasi"}
+                              </Badge>
+                              <div className="text-xs text-slate-400 mt-1">
+                                {v.evidence_reason === "driver_not_active" ? "Periksa status driver" :
+                                  v.evidence_reason === "snapshot_missing" ? "Tidak ada di snapshot terbaru" :
+                                  v.evidence_reason === "no_transactions" ? "Belum ada transaksi" :
+                                  v.evidence_reason === "stale_transaction" ? "Transaksi lebih dari 30 hari" :
+                                  v.evidence_reason === "transactions_unavailable" ? "Data transaksi tidak tersedia" :
+                                  v.evidence_reason === "transaction_date_invalid" ? "Tanggal transaksi perlu verifikasi" : ""}
+                              </div>
                             </td>
                             <td className="px-4 py-3">
                               {isManual ? (
