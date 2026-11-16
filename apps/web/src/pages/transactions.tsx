@@ -40,7 +40,7 @@ export default function FleetTransactionsPage() {
       return res.json() as Promise<{
         transactions: Array<Record<string, unknown>>;
         summary: Record<string, unknown>;
-        sourceStatus?: { normalizedRows: number; rawRows: number; state: "normalized" | "raw_only" | "no_source_data" };
+        sourceStatus?: { normalizedRows: number; rawRows: number; totalFilteredRows?: number; excludedByEligibility?: number; state: "normalized" | "raw_only" | "no_source_data" };
       }>;
     },
   });
@@ -49,6 +49,9 @@ export default function FleetTransactionsPage() {
   const summary = data?.summary ?? {};
   const sourceStatus = data?.sourceStatus;
   const noSourceData = sourceStatus?.state === "no_source_data";
+  const excludedRows = Math.max(0, Number(sourceStatus?.excludedByEligibility ?? 0));
+  const feeLedgerOnly = Number(summary.total ?? 0) > 0
+    && Number(summary.rental_fee_rows ?? 0) === Number(summary.total ?? 0);
 
   function applyFilters() {
     setDriverSearchApplied(driverSearch);
@@ -67,7 +70,7 @@ export default function FleetTransactionsPage() {
   const hasActiveFilters = driverSearchApplied || vehiclePlateApplied;
 
   function exportCsv() {
-    const cols = ["Tanggal", "Nama Driver", "Plat", "Layanan", "Trip", "Gross Revenue", "Insentif", "Komisi", "Potongan", "Net Revenue", "Outstanding", "PPN Rate", "PPN Amount"];
+    const cols = ["Tanggal", "Nama Driver", "Plat", "Layanan", "Trip", feeLedgerOnly ? "Tagihan Sewa" : "Gross Revenue", "Insentif", "Komisi", "Potongan", feeLedgerOnly ? "Nilai Biaya Sewa" : "Net Revenue", "Outstanding", "PPN Rate", "PPN Amount"];
     const rows = transactions.map((t) => [
       t.transaction_date, t.driver_name, t.vehicle_plate,
       t.service_type, t.trip_count, t.gross_revenue, t.incentive, t.commission,
@@ -204,13 +207,29 @@ export default function FleetTransactionsPage() {
           </Card>
         )}
 
+        {/* Historical sources are kept in the ledger even when active eligibility filters hide them. */}
+        {excludedRows > 0 && (
+          <Card className="border-amber-500/20 bg-amber-500/[0.055]">
+            <CardContent className="p-4 text-sm text-amber-200">
+              {fmtNum(excludedRows)} transaksi sumber pada periode/filter ini tersimpan, tetapi tidak tampil sebagai transaksi driver aktif karena status driver, snapshot, atau identitas kendaraan perlu ditinjau. Transaksi tidak dihapus dan driver tidak diaktifkan otomatis.
+            </CardContent>
+          </Card>
+        )}
+        {feeLedgerOnly && (
+          <Card className="border-blue-500/20 bg-blue-500/[0.045]">
+            <CardContent className="p-4 text-sm text-blue-200">
+              Data pada periode/filter ini merupakan Rental fee due dan Rental fee deduction (biaya sewa), bukan pendapatan perjalanan GoCar. Angka bersih di bawah adalah pergerakan biaya sewa driver yang memenuhi filter aktif, bukan omzet perjalanan atau laba perusahaan.
+            </CardContent>
+          </Card>
+        )}
+
         {/* Summary */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Total Transaksi", value: fmtNum(summary.total) },
             { label: "Total Trip", value: fmtNum(summary.total_trips) },
-            { label: "Total Net Revenue", value: fmtIdr(summary.total_net) },
-            { label: "Total Gross Revenue", value: fmtIdr(summary.total_gross) },
+            { label: feeLedgerOnly ? "Pergerakan Biaya Sewa Bersih" : "Total Net Revenue", value: fmtIdr(feeLedgerOnly ? summary.rental_fee_signed_net : summary.total_net) },
+            { label: feeLedgerOnly ? "Tagihan Biaya Sewa" : "Total Gross Revenue", value: fmtIdr(feeLedgerOnly ? summary.rental_fee_due_total : summary.total_gross) },
           ].map((s) => (
             <Card key={s.label} className="bg-slate-800/60 border-slate-700">
               <CardContent className="p-4">
@@ -228,7 +247,7 @@ export default function FleetTransactionsPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-700">
                   <tr>
-                    {["Tanggal", "Driver", "Plat", "Layanan", "Trip", "Gross", "Insentif", "Komisi", "Potongan", "Net Revenue", "Outstanding", "PPN"].map((h) => (
+                    {["Tanggal", "Driver", "Plat", "Layanan", "Trip", feeLedgerOnly ? "Tagihan Sewa" : "Gross", "Insentif", "Komisi", "Potongan", feeLedgerOnly ? "Biaya Sewa Bersih" : "Net Revenue", "Outstanding", "PPN"].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>

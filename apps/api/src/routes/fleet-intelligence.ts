@@ -2121,7 +2121,11 @@ router.get("/transactions", async (req: AdminRequest, res) => {
       `SELECT COUNT(*)::int AS total,
               COALESCE(SUM(trip_count),0)::int AS total_trips,
               COALESCE(SUM(net_revenue),0)::numeric AS total_net,
-              COALESCE(SUM(gross_revenue),0)::numeric AS total_gross
+              COALESCE(SUM(gross_revenue),0)::numeric AS total_gross,
+              COUNT(*) FILTER (WHERE transaction_type IN ('Rental fee due','Rental fee deduction'))::int AS rental_fee_rows,
+              COALESCE(SUM(amount) FILTER (WHERE transaction_type IN ('Rental fee due','Rental fee deduction')),0)::numeric AS rental_fee_signed_net,
+              COALESCE(SUM(amount) FILTER (WHERE transaction_type='Rental fee due'),0)::numeric AS rental_fee_due_total,
+              COALESCE(SUM(amount) FILTER (WHERE transaction_type='Rental fee deduction'),0)::numeric AS rental_fee_deduction_total
          FROM public.fleet_transactions
         WHERE company_id=$1
           AND EXISTS (
@@ -2150,14 +2154,31 @@ router.get("/transactions", async (req: AdminRequest, res) => {
           [cid],
         )).rows[0]?.count ?? 0)
       : 0;
+    // Count all source rows within the same filters, separately from the
+    // existing active-driver eligibility rule. This keeps historical events
+    // visible as a reconciliation count without activating an inactive driver.
+    const sourceCount = await pool.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total
+         FROM public.fleet_transactions
+        WHERE company_id=$1
+          AND ($2::date IS NULL OR transaction_date >= $2::date)
+          AND ($3::date IS NULL OR transaction_date <= $3::date)
+          AND ($4='' OR COALESCE(driver_name,'') ILIKE '%' || $4 || '%' OR COALESCE(driver_external_id,'') ILIKE '%' || $4 || '%')
+          AND ($5='' OR COALESCE(vehicle_plate,'') ILIKE '%' || $5 || '%')`,
+      [cid, startDate, endDate, driverSearch, vehiclePlate],
+    );
     const normalizedRows = Number(summary.rows[0]?.total ?? 0);
+    const totalFilteredRows = Number(sourceCount.rows[0]?.total ?? 0);
+    const excludedByEligibility = Math.max(0, totalFilteredRows - normalizedRows);
     res.json({
       transactions: rows.rows,
       summary: summary.rows[0] ?? {},
       sourceStatus: {
         normalizedRows,
         rawRows,
-        state: normalizedRows > 0 ? "normalized" : rawRows > 0 ? "raw_only" : "no_source_data",
+        totalFilteredRows,
+        excludedByEligibility,
+        state: normalizedRows > 0 ? "normalized" : totalFilteredRows > 0 ? "normalized" : rawRows > 0 ? "raw_only" : "no_source_data",
       },
     });
   } catch (error) {
