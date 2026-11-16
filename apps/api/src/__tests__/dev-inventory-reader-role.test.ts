@@ -16,7 +16,11 @@ describe("CST-DEV inventory evidence reader role, NOLOGIN fail-closed", () => {
     expect(roleSql).toContain("NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS");
     expect(roleSql).toContain("default_transaction_read_only = on");
     expect(roleSql).not.toMatch(/\b(?:ALTER\s+ROLE|CREATE\s+ROLE)\s+postgres\b/i);
-    expect(roleSql).not.toMatch(/\bLOGIN\b(?!\s+NOINHERIT)/i);
+    const declaration = roleSql.split("CREATE ROLE fleet_dev_cst_inventory_reader")[1]?.split(";")[0];
+    expect(declaration).toBeTruthy();
+    expect(declaration).toContain("NOLOGIN");
+    expect(declaration).not.toMatch(/(?:^|\s)LOGIN(?:\s|$)/);
+    expect(roleSql).not.toMatch(/ALTER\s+ROLE\s+fleet_dev_cst_inventory_reader\s+(?:WITH\s+)?LOGIN\b/i);
   });
 
   it("grants read-only access on Fleet tables, not writes or unrelated data", () => {
