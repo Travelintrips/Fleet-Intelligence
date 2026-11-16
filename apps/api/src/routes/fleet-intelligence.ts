@@ -7,6 +7,7 @@ import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
+import { assessFleetVehicleEvidence } from "../lib/fleet-vehicle-evidence";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -2304,16 +2305,48 @@ router.get("/vehicles", async (req: AdminRequest, res) => {
       return;
     }
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    // Fleet vehicle inventory status is NOT driver eligibility or dispatch permission.
+    // Read-only transaction evidence is scoped to the authenticated numeric company.
+    // Keep the existing vehicle endpoint working if an older DEV schema lacks TX.
+    const hasTransactions = await tableExists("fleet_transactions");
+    const transactionProjection = hasTransactions
+      ? "COALESCE(tx.tx_count,0)::int AS tx_count, tx.last_transaction_date"
+      : "NULL::int AS tx_count, NULL::text AS last_transaction_date";
+    const transactionJoin = hasTransactions
+      ? `LEFT JOIN (
+           SELECT upper(regexp_replace(coalesce(vehicle_plate,''),'[^[:alnum:]]','','g')) AS plate_key,
+                  COUNT(*)::int AS tx_count, MAX(transaction_date)::text AS last_transaction_date
+             FROM public.fleet_transactions
+            WHERE company_id=$1
+            GROUP BY 1
+         ) tx ON tx.plate_key=upper(regexp_replace(coalesce(v.plate,''),'[^[:alnum:]]','','g'))`
+      : "";
     const result = await pool.query(
-      `SELECT v.*, d.full_name AS driver_name, d.driver_external_id
+      `SELECT v.*, d.full_name AS driver_name, d.driver_external_id,
+              d.status AS driver_status, d.applicator_status,
+              d.source_present_in_latest_snapshot AS snapshot_present,
+              d.source_last_synced_at AS snapshot_synced_at,
+              ${transactionProjection}
          FROM public.fleet_vehicles v
          LEFT JOIN public.fleet_drivers d ON d.id=v.driver_id AND d.company_id=v.company_id::text
+         ${transactionJoin}
         WHERE v.company_id=$1
         ORDER BY v.plate ASC
         LIMIT $2`,
       [cid, limit],
     );
-    res.json({ vehicles: result.rows });
+    const checkedAt = new Date();
+    const vehicles = result.rows.map((row) => ({
+      ...row,
+      ...assessFleetVehicleEvidence({
+        driverStatus: row.driver_status,
+        snapshotPresent: row.snapshot_present,
+        transactionCount: row.tx_count,
+        lastTransactionDate: row.last_transaction_date,
+      }, checkedAt),
+    }));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ vehicles });
   } catch (error) {
     req.log.error({ error }, "Fleet vehicles failed");
     res.status(503).json({ error: "Gagal mengambil kendaraan." });
