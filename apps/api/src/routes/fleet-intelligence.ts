@@ -16,6 +16,8 @@ import {
   updateFleetAccountingSettings,
 } from "../lib/central-finance-client";
 
+class FleetCsvValidationError extends Error {}
+
 const router = Router();
 
 async function getGojekServerConnectorHealth() {
@@ -107,6 +109,10 @@ router.post("/gojek-connector/dry-run", async (req, res) => {
       persisted: false,
     });
   } catch (error) {
+    if (error instanceof FleetCsvValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     req.log.error({ error }, "Gojek connector dry-run failed");
     res.status(500).json({ error: error instanceof Error ? error.message : "Dry-run gagal." });
   }
@@ -156,7 +162,7 @@ router.post("/gojek-connector/handoff", async (req, res) => {
   } catch (error) {
     req.log.error({ error }, "Gojek connector handoff failed");
     const message = error instanceof Error ? error.message : "Gagal memproses export Gojek.";
-    res.status(message.includes("sudah pernah") ? 409 : 500).json({ error: message });
+    res.status(error instanceof FleetCsvValidationError ? 400 : message.includes("sudah pernah") ? 409 : 500).json({ error: message });
   }
 });
 
@@ -535,7 +541,7 @@ function csvRows(content: string): string[][] {
   }
 
   if (cell.length || row.length) pushRow();
-  if (quoted) throw new Error("CSV memiliki kutip yang tidak tertutup.");
+  if (quoted) throw new FleetCsvValidationError("CSV memiliki kutip yang tidak tertutup.");
   return rows;
 }
 
@@ -568,7 +574,7 @@ function parseSnapshotCsv(content: string): Array<Omit<SnapshotRow, "match_statu
   const statusIdx = find("status");
 
   if (nameIdx < 0 || outIdx < 0) {
-    throw new Error("CSV wajib memiliki kolom Driver Name dan Outstanding.");
+    throw new FleetCsvValidationError("CSV wajib memiliki kolom Driver Name dan Outstanding.");
   }
 
   return rows.slice(1).map((cells) => {
@@ -617,7 +623,7 @@ function parseGojekTransactionCsv(content: string) {
     gopayRef:find("gopay transaction reference id","gopay reference id","gopay ref id","reference id"),
     serviceType:find("service type","service","layanan"),
   };
-  if(idx.driverName<0||idx.amount<0) throw new Error("CSV transaksi wajib memiliki kolom Driver Name dan Amount.");
+  if(idx.driverName<0||idx.amount<0) throw new FleetCsvValidationError("CSV transaksi wajib memiliki kolom Driver Name dan Amount.");
   const mapping:Record<string,string|null>={};
   for(const [key,index] of Object.entries(idx)) mapping[key]=index>=0?headers[index]:null;
   const warnings:string[]=[];
