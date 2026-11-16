@@ -443,7 +443,7 @@ export function createDevAuthRouter(): Router {
   router.get("/auth/google/status", (_request, response, next) => {
     if (!isDevelopmentEnvironment()) return next();
     response.setHeader("Cache-Control", "no-store");
-    response.json({ enabled: fleetDevGoogleConfig() !== null });
+    response.json({ enabled: fleetDevGoogleConfig() !== null, devGoogleOnly: isFleetDevGoogleMode() });
   });
 
   router.get("/auth/google/start", (request, response, next) => {
@@ -655,6 +655,10 @@ export function createDevAuthRouter(): Router {
     const user = getDevSession(request);
     if (user) {
       response.json({ user });
+      return;
+    }
+    if (isFleetDevGoogleMode()) {
+      response.status(401).json({ error: "Unauthorized" });
       return;
     }
     next();

@@ -41,7 +41,15 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [password,setPassword]=React.useState("");
   const [loading,setLoading]=React.useState(false);
   const [googleEnabled,setGoogleEnabled]=React.useState(false);
-  React.useEffect(()=>{void fetch("/api/auth/google/status",{credentials:"include"}).then(r=>r.ok?r.json():null).then(v=>setGoogleEnabled(v?.enabled===true)).catch(()=>undefined);},[]);
+  const [devGoogleOnly,setDevGoogleOnly]=React.useState(false);
+  React.useEffect(()=>{
+    void fetch("/api/auth/google/status",{credentials:"include"})
+      .then(r=>r.ok?r.json():null)
+      .then(v=>{
+        setGoogleEnabled(v?.enabled===true);
+        setDevGoogleOnly(v?.devGoogleOnly===true);
+      }).catch(()=>undefined);
+  },[]);
   const devLoginEnabled=String(import.meta.env.VITE_ENABLE_DEV_LOGIN ?? "").toLowerCase()==="true";
 
   async function login(path:string, body:Record<string,string>) {
@@ -68,11 +76,13 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
         <h1 className="text-xl font-semibold">Fleet Intelligence</h1>
         <p className="mt-1 text-sm text-slate-400">Masuk dengan akun CST yang memiliki akses company.</p>
+        {!devGoogleOnly && (
         <form className="mt-6 space-y-3" onSubmit={(e)=>{e.preventDefault(); void login("/api/auth/email-login",{email,password});}}>
           <input className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm" type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required />
           <input className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required />
           <button disabled={loading} className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-medium disabled:opacity-50">{loading?"Memproses…":"Masuk"}</button>
         </form>
+        )}
         {googleEnabled && (
           <div className="mt-4">
             <div className="mb-3 flex items-center gap-3 text-xs text-slate-500"><span className="h-px flex-1 bg-slate-700" />atau<span className="h-px flex-1 bg-slate-700" /></div>

@@ -108,7 +108,9 @@ describe("Fleet DEV Google SSO HTTP route E2E with MOCKED GoTrue only", () => {
 
       const status = await get("/api/auth/google/status");
       expect(status.status).toBe(200);
-      expect((await status.json() as { enabled: boolean }).enabled).toBe(true);
+      expect(await status.json() as { enabled: boolean; devGoogleOnly: boolean }).toMatchObject({
+        enabled: true, devGoogleOnly: true,
+      });
 
       const start = await get("/api/auth/google/start");
       expect(start.status).toBe(302);
