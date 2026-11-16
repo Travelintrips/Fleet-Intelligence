@@ -5,8 +5,18 @@ import { describe, it, expect } from "vitest";
 const entry = readFileSync(resolve(process.cwd(), "src/index.ts"), "utf8");
 const devCompose = readFileSync(resolve(process.cwd(), "../../deploy/docker-compose.dev.yml"), "utf8");
 const prodCompose = readFileSync(resolve(process.cwd(), "../../deploy/docker-compose.prod.yml"), "utf8");
+const apiDockerfile = readFileSync(resolve(process.cwd(), "Dockerfile"), "utf8");
 
 describe("Fleet API DEV-only scheduler fence", () => {
+  it("keeps the HTTP loopback Docker healthcheck compatible with HTTPS proxy enforcement", () => {
+    expect(apiDockerfile).toContain("HEALTHCHECK --interval=30s --timeout=3s --retries=3");
+    expect(apiDockerfile).toContain("x-forwarded-proto");
+    expect(apiDockerfile).toContain("https");
+    expect(apiDockerfile).toContain("/api/healthz");
+    expect(apiDockerfile).toContain("AbortSignal.timeout(2500)");
+    expect(apiDockerfile).not.toContain("wget -qO- http://127.0.0.1:8080/api/healthz");
+  });
+
   it("rejects scheduler startup in DEV when DISABLE_BACKGROUND_SCHEDULERS=true", () => {
     expect(entry).toContain("isDevelopmentEnvironment() && process.env.DISABLE_BACKGROUND_SCHEDULERS === \"true\"");
     expect(entry).toContain("const leaderRetryTimer = backgroundSchedulerDisabled");
