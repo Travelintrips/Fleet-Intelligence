@@ -749,21 +749,24 @@ async function importGojekConnectorCsv(args: {
       }
 
       try {
-        await client.query(
+        const normalizedInsert = await client.query<{ id: number }>(
           `INSERT INTO public.fleet_transactions(
              company_id,report_id,driver_external_id,driver_name,vehicle_plate,transaction_date,
              trip_count,gross_revenue,incentive,commission,deduction,net_revenue,
              outstanding_balance,service_type,raw_data,amount,transaction_type,driver_phone,gopay_reference_id
            )
            VALUES($1,$2,$3,$4,$5,$6,0,GREATEST($7,0),0,0,0,$7,$8,$9,$10::jsonb,$7,$11,$12,NULLIF($13,''))
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
           [
             args.companyId, reportId, row.driverExtId || null, row.driverName, row.vehiclePlate || null,
             row.txDate, row.amount, row.outstanding, row.serviceType || null, JSON.stringify(row.raw),
             row.transactionType || null, row.driverPhone || null, row.gopayRef,
           ],
         );
-        successRows += 1;
+        // Do not report an existing GoPay reference as newly imported.
+        // ON CONFLICT DO NOTHING completes without an exception or inserted row.
+        if (normalizedInsert.rows.length === 1) successRows += 1;
       } catch (rowError) {
         await client.query(
           `INSERT INTO public.gojek_failed_rows(
