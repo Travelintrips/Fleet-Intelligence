@@ -60,6 +60,26 @@ describe("CST DEV private Gojek CSV route: HTTP behavior without database writes
         ok: true, dryRun: true, exportType: "transactions", rowCount: 2, persisted: false,
       });
 
+      // Keep both existing safe dedup paths usable: GoPay ref or Driver ID.
+      const fallbackWithDriverId = [
+        "Driver Name,Driver ID,Date Time JKT,Vehicle,Amount,Transaction Type",
+        "FICTITIOUS DRIVER-ID,ID-001,2026-11-16 14:11:00,TEST-CAR-04,12500,synthetic",
+      ].join("\n");
+      const fallbackResponse = await post("/dry-run", fallbackWithDriverId);
+      expect(fallbackResponse.status).toBe(200);
+      expect(await fallbackResponse.json()).toMatchObject({
+        ok: true, exportType: "transactions", rowCount: 1, persisted: false,
+      });
+      const withGoPayRef = [
+        "Driver Name,Date Time JKT,Vehicle,Amount,Transaction Type,GoPay Transaction Reference ID",
+        "FICTITIOUS GOPAY,2026-11-16 14:12:00,TEST-CAR-05,12500,synthetic,MOCK-REF-005",
+      ].join("\n");
+      const withRefResponse = await post("/dry-run", withGoPayRef);
+      expect(withRefResponse.status).toBe(200);
+      expect(await withRefResponse.json()).toMatchObject({
+        ok: true, exportType: "transactions", rowCount: 1, persisted: false,
+      });
+
       const validDrivers = [
         "Driver Name,Phone Number,License Plate,Rental fee(Daily),Outstanding,Status",
         "FICTITIOUS D,0000000000,TEST-CAR-03,5000,0,Active",
@@ -69,6 +89,20 @@ describe("CST DEV private Gojek CSV route: HTTP behavior without database writes
       expect(await drivers.json()).toMatchObject({
         ok: true, dryRun: true, exportType: "driver_snapshot", rowCount: 1, persisted: false,
       });
+
+      // Both identifiers absent: existing fallback UNIQUE index cannot
+      // deduplicate a NULL Driver ID, so reject the full file before writing.
+      const missingBothIdentifiers = [
+        "Driver Name,Date Time JKT,Vehicle,Amount,Transaction Type",
+        "FICTITIOUS NO-ID,2026-11-16 14:13:00,TEST-CAR-06,12500,synthetic",
+      ].join("\n");
+      for (const path of ["/dry-run", "/handoff"]) {
+        const res = await post(path, missingBothIdentifiers);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({
+          error: "CSV transaksi: baris data 1 tidak memiliki GoPay Reference ID maupun Driver ID; perlu verifikasi sumber sebelum impor agar tidak duplikat.",
+        });
+      }
 
       const malformedHeader = "Bad Header,Not Amount\nFICTITIOUS,123";
       for (const path of ["/dry-run", "/handoff"]) {
@@ -95,7 +129,7 @@ describe("CST DEV private Gojek CSV route: HTTP behavior without database writes
 
       const { pool } = await import("../lib/db");
       const queryCalls = vi.mocked(pool.query).mock.calls;
-      expect(queryCalls).toHaveLength(2);
+      expect(queryCalls).toHaveLength(4);
       expect(queryCalls.every(([query]) => query === "SELECT 1")).toBe(true);
     } finally {
       await new Promise<void>((resolve, reject) =>
