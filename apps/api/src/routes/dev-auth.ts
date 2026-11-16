@@ -84,7 +84,7 @@ function fleetDevGoogleConfig(): {
   allowedCanonicalId: string;
 } | null {
   if (!isFleetDevGoogleMode()) return null;
-  if (process.env.APP_BASE_URL?.replace(/\\/$/, "") !== FLEET_DEV_GOOGLE_ORIGIN) return null;
+  if (process.env.APP_BASE_URL !== FLEET_DEV_GOOGLE_ORIGIN) return null;
   const publishableKey = process.env.FLEET_DEV_SUPABASE_PUBLISHABLE_KEY?.trim() ?? "";
   const allowedAuthId = process.env.FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID?.trim() ?? "";
   const allowedCanonicalId = process.env.FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID?.trim() ?? "";
