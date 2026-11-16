@@ -652,6 +652,15 @@ function parseGojekTransactionCsv(content: string) {
       raw,
     };
   }).filter(r=>r.driverName||r.driverExtId||r.amount!==0);
+  // A missing GoPay reference is only safe for automatic import when the
+  // fallback uniqueness key includes a nonempty Driver ID. PostgreSQL's
+  // normal UNIQUE semantics treat NULL Driver IDs as distinct.
+  const identitylessRow = rows.findIndex(r => !r.gopayRef && !r.driverExtId);
+  if (identitylessRow >= 0) {
+    throw new FleetCsvValidationError(
+      `CSV transaksi: baris data ${identitylessRow + 1} tidak memiliki GoPay Reference ID maupun Driver ID; perlu verifikasi sumber sebelum impor agar tidak duplikat.`,
+    );
+  }
   return {headers,rows,mapping,warnings};
 }
 
