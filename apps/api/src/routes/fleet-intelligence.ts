@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
+import { fleetVehicleReadSql } from "../lib/fleet-vehicle-read-model";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
@@ -2304,15 +2305,9 @@ router.get("/vehicles", async (req: AdminRequest, res) => {
       return;
     }
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-    const result = await pool.query(
-      `SELECT v.*, d.full_name AS driver_name, d.driver_external_id
-         FROM public.fleet_vehicles v
-         LEFT JOIN public.fleet_drivers d ON d.id=v.driver_id AND d.company_id=v.company_id::text
-        WHERE v.company_id=$1
-        ORDER BY v.plate ASC
-        LIMIT $2`,
-      [cid, limit],
-    );
+    // Optional activity source; preserve inventory GET if transactions are absent.
+    const hasTransactionTable = await tableExists("fleet_transactions");
+    const result = await pool.query(fleetVehicleReadSql(hasTransactionTable), [cid, limit]);
     res.json({ vehicles: result.rows });
   } catch (error) {
     req.log.error({ error }, "Fleet vehicles failed");

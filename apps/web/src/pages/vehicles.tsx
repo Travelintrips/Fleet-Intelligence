@@ -28,6 +28,7 @@ export default function FleetVehiclesPage() {
     queryKey: ["fleet-vehicles"],
     queryFn: async () => {
       const res = await fetch("/api/logistics/fleet/vehicles", { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal membaca kendaraan Fleet (HTTP " + res.status + ")");
       return res.json() as Promise<{ vehicles: Vehicle[] }>;
     },
   });
@@ -83,7 +84,7 @@ export default function FleetVehiclesPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Total Kendaraan", value: total },
-            { label: "Aktif", value: aktif },
+            { label: "Aktif Kendaraan", value: aktif },
             { label: "Motor", value: motor },
             { label: "Mobil", value: mobil },
           ].map((s) => (
@@ -99,6 +100,11 @@ export default function FleetVehiclesPage() {
           ))}
         </div>
 
+        <p className="text-xs text-amber-300">
+          Status aktif adalah status kendaraan, bukan status driver dan bukan izin dispatch.
+          Kolom transaksi menunjukkan jumlah catatan transaksi serta tanggal transaksi terakhir.
+        </p>
+
         {/* Table */}
         <Card className="bg-slate-800/60 border-slate-700">
           <CardContent className="p-0">
@@ -106,7 +112,7 @@ export default function FleetVehiclesPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-700">
                   <tr>
-                    {["Plat", "Tipe", "Merk/Model", "Driver Terakhir", "Terakhir Aktif", "Transaksi", "Sumber", "Status"].map((h) => (
+                    {["Plat", "Tipe", "Merk/Model", "Driver Terakhir", "Transaksi Terakhir", "Transaksi", "Sumber", "Status Kendaraan"].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -146,9 +152,10 @@ export default function FleetVehiclesPage() {
                             <td className="px-4 py-3 text-slate-300">{brandModel}</td>
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap max-w-[140px] truncate">
                               {String(v.driver_name ?? "—")}
+                              <div className="text-xs mt-1 text-slate-500">{String(v.driver_status ?? "unknown") === "active" ? "Driver aktif" : String(v.driver_status ?? "unknown") === "suspended" ? "Driver suspended" : String(v.driver_status ?? "unknown") === "inactive" ? "Driver tidak aktif" : "Status driver belum terverifikasi"}</div>
                             </td>
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-xs">
-                              {fmtDate(v.last_seen_date)}
+                              {fmtDate(v.last_transaction_date)}
                             </td>
                             <td className="px-4 py-3 text-slate-400 text-right tabular-nums">
                               {v.tx_count != null ? Number(v.tx_count).toLocaleString("id-ID") : "—"}
