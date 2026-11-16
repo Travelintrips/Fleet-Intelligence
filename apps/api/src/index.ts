@@ -117,12 +117,22 @@ const tryBecomeBackgroundLeader = async () => {
   }
 };
 
-const leaderRetryTimer = setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
-leaderRetryTimer.unref();
-setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+// DEV-only kill switch: keep Fleet API read routes available without ever
+// acquiring advisory leader locks or launching WA/Gojek/Finance background jobs.
+// PROD retains its existing scheduling behavior regardless of this flag.
+const backgroundSchedulerDisabled =
+  isDevelopmentEnvironment() && process.env.DISABLE_BACKGROUND_SCHEDULERS === "true";
+
+const leaderRetryTimer = backgroundSchedulerDisabled
+  ? null
+  : setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
+if (leaderRetryTimer) {
+  leaderRetryTimer.unref();
+  setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+}
 
 const stop = () => {
-  clearInterval(leaderRetryTimer);
+  if (leaderRetryTimer) clearInterval(leaderRetryTimer);
   stopBackgroundJobs();
   const client = backgroundLeaderClient;
   backgroundLeaderClient = null;
