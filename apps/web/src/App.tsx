@@ -82,7 +82,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             <p className="mt-2 text-center text-xs text-slate-400">Hanya untuk akun CST Fleet yang sudah disetujui admin.</p>
           </div>
         )}
-        {devLoginEnabled && (
+        {devLoginEnabled && !googleEnabled && (
           <button disabled={loading||!email} onClick={()=>void login("/api/auth/dev-login",{email})} className="mt-3 w-full rounded-lg border border-amber-600/60 px-3 py-2.5 text-sm text-amber-300 disabled:opacity-50">
             DEV Login dengan email
           </button>
@@ -114,7 +114,29 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
   },[]);
 
-  React.useEffect(()=>{void check();},[check]);
+  React.useEffect(()=>{
+    // GoTrue implicit OAuth returns credentials in the URL fragment. Remove them
+    // BEFORE making any network request; never put tokens in storage or logs.
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+    const tokens = new URLSearchParams(hash);
+    const accessToken = tokens.get("access_token");
+    if (tokens.has("access_token") || tokens.has("refresh_token") || tokens.has("error")) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    if (!accessToken || window.location.origin !== "https://dev-fleet.cstlogistic.co.id") {
+      void check();
+      return;
+    }
+    void fetch("/api/auth/google-dev-exchange", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ access_token: accessToken }),
+    })
+      .then((response) => { if (!response.ok) throw new Error("DEV OAuth failed"); })
+      .then(() => check())
+      .catch(() => { toast.error("Login Google Fleet DEV gagal atau belum diizinkan."); void check(); });
+  },[check]);
 
   if(state==="loading") return <Fallback />;
   if(state==="anonymous") return <LoginScreen onLoggedIn={()=>void check()} />;

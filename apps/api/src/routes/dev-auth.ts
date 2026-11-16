@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { trustedFleetDevGoogleIdentity, verifiedGoogleOAuthExpiry } from "../lib/fleet-dev-google-identity";
 import { Router, type Request, type Response } from "express";
 import {
   getRuntimeDatabaseUrl,
@@ -29,6 +30,11 @@ export interface ProductionSession {
 const DEV_SESSION_COOKIE = "fleet_dev_session";
 const PRODUCTION_SESSION_COOKIE = "fleet_session";
 const DEV_SESSION_TTL_SECONDS = 8 * 60 * 60;
+const FLEET_DEV_GOOGLE_COOKIE = "fleet_dev_google_session";
+const FLEET_DEV_GOOGLE_ORIGIN = "https://dev-fleet.cstlogistic.co.id";
+const FLEET_DEV_GOOGLE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co";
+const FLEET_DEV_GOOGLE_SESSION_MS = 30 * 60 * 1000;
+
 
 export function isDevelopmentEnvironment(): boolean {
   const appEnvironment = process.env.APP_ENV?.trim().toLowerCase();
@@ -67,6 +73,25 @@ function getExplicitSessionSecret(): string | null {
 function getSessionSecret(): string | null {
   return getExplicitSessionSecret() ?? initializedProductionSessionSecret;
 }
+
+function isFleetDevGoogleMode(): boolean {
+  return isDevelopmentEnvironment() && process.env.FLEET_DEV_GOOGLE_AUTH_ENABLED === "true";
+}
+
+function fleetDevGoogleConfig(): {
+  publishableKey: string;
+  allowedAuthId: string;
+  allowedCanonicalId: string;
+} | null {
+  if (!isFleetDevGoogleMode()) return null;
+  if (process.env.APP_BASE_URL?.replace(/\\/$/, "") !== FLEET_DEV_GOOGLE_ORIGIN) return null;
+  const publishableKey = process.env.FLEET_DEV_SUPABASE_PUBLISHABLE_KEY?.trim() ?? "";
+  const allowedAuthId = process.env.FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID?.trim() ?? "";
+  const allowedCanonicalId = process.env.FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID?.trim() ?? "";
+  if (!publishableKey || !allowedAuthId || !allowedCanonicalId || !getSessionSecret()) return null;
+  return { publishableKey, allowedAuthId, allowedCanonicalId };
+}
+
 
 export async function initializeProductionSessionSigning(): Promise<void> {
   if (isDevelopmentEnvironment()) return;
@@ -243,6 +268,31 @@ function decodeSignedCookie<T>(request: Request, cookieName: string): T | null {
 export function getDevSession(request: Request): DevAuthUser | null {
   if (!isDevelopmentEnvironment()) return null;
 
+  // When Google mode is ON, reject all legacy passwordless DEV sessions.
+  if (isFleetDevGoogleMode()) {
+    const config = fleetDevGoogleConfig();
+    if (!config) return null;
+    const session = decodeSignedCookie<DevSession & {
+      authSupabaseId: string;
+      canonicalUserId: string;
+      authSource: string;
+    }>(request, FLEET_DEV_GOOGLE_COOKIE);
+    if (!session || session.authSource !== "verified_supabase_google" ||
+        session.authSupabaseId !== config.allowedAuthId ||
+        session.canonicalUserId !== config.allowedCanonicalId ||
+        session.role !== "super_admin" || session.companyId !== 1 ||
+        session.id !== session.authSupabaseId ||
+        typeof session.email !== "string" || !session.email.includes("@") ||
+        !Number.isFinite(session.issuedAt) || !Number.isFinite(session.expiresAt) ||
+        session.issuedAt > Date.now() || session.expiresAt <= Date.now() ||
+        session.expiresAt - session.issuedAt > FLEET_DEV_GOOGLE_SESSION_MS) return null;
+    return {
+      id: session.id, email: session.email,
+      role: "super_admin", companyId: 1,
+      firstName: session.firstName, lastName: session.lastName,
+    };
+  }
+
   const secret = getSessionSecret();
   const raw = getCookie(request, DEV_SESSION_COOKIE);
   if (!secret || !raw) return null;
@@ -389,6 +439,98 @@ function getSafeRedirect(value: unknown): string {
 export function createDevAuthRouter(): Router {
   const router = Router();
 
+  // Keep Fleet PROD's existing Google provider flow untouched.
+  router.get("/auth/google/status", (_request, response, next) => {
+    if (!isDevelopmentEnvironment()) return next();
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ enabled: fleetDevGoogleConfig() !== null });
+  });
+
+  router.get("/auth/google/start", (request, response, next) => {
+    if (!isDevelopmentEnvironment()) return next();
+    const cfg = fleetDevGoogleConfig();
+    if (!cfg || !request.secure || request.hostname !== "dev-fleet.cstlogistic.co.id") {
+      response.status(404).json({ error: "Google DEV not configured" });
+      return;
+    }
+    const authorize = new URL("/auth/v1/authorize", FLEET_DEV_GOOGLE_SUPABASE_URL);
+    authorize.searchParams.set("provider", "google");
+    authorize.searchParams.set("redirect_to", FLEET_DEV_GOOGLE_ORIGIN + "/logistics/fleet-intelligence/vehicles");
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.redirect(302, authorize.toString());
+  });
+
+  router.post("/auth/google-dev-exchange", async (request, response): Promise<void> => {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    const cfg = fleetDevGoogleConfig();
+    if (!cfg || !request.secure || request.hostname !== "dev-fleet.cstlogistic.co.id" ||
+        request.get("origin") !== FLEET_DEV_GOOGLE_ORIGIN ||
+        !request.is("application/json")) {
+      response.status(403).json({ error: "DEV Google exchange forbidden" });
+      return;
+    }
+    const token = typeof request.body?.access_token === "string"
+      ? request.body.access_token.trim() : "";
+    if (token.length < 80 || token.length > 16000) {
+      response.status(401).json({ error: "Invalid Google session" });
+      return;
+    }
+    const expiry = verifiedGoogleOAuthExpiry(token);
+    if (!expiry) {
+      response.status(401).json({ error: "Verified Google OAuth session required" });
+      return;
+    }
+    try {
+      const verified = await fetch(FLEET_DEV_GOOGLE_SUPABASE_URL + "/auth/v1/user", {
+        method: "GET",
+        headers: {
+          apikey: cfg.publishableKey,
+          Authorization: "Bearer " + token,
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!verified.ok) {
+        response.status(401).json({ error: "Invalid Google session" });
+        return;
+      }
+      const identity = trustedFleetDevGoogleIdentity(await verified.json(), {
+        allowedAuthId: cfg.allowedAuthId,
+        allowedCanonicalId: cfg.allowedCanonicalId,
+      });
+      if (!identity) {
+        response.status(403).json({ error: "Super Admin Fleet DEV authorization denied" });
+        return;
+      }
+      const now = Date.now();
+      const session: DevSession & {
+        authSupabaseId: string;
+        canonicalUserId: string;
+        authSource: string;
+      } = {
+        id: identity.id, email: identity.email,
+        firstName: null, lastName: null, role: "super_admin", companyId: 1,
+        authSupabaseId: identity.id,
+        canonicalUserId: identity.canonicalUserId,
+        authSource: "verified_supabase_google",
+        issuedAt: now,
+        expiresAt: Math.min(expiry, now + FLEET_DEV_GOOGLE_SESSION_MS),
+      };
+      const payload = encode(JSON.stringify(session));
+      response.append("Set-Cookie",
+        FLEET_DEV_GOOGLE_COOKIE + "=" + payload + "." + sign(payload, getSessionSecret()!) +
+        "; Max-Age=1800; Path=/; HttpOnly; Secure; SameSite=Lax");
+      response.json({ user: {
+        id: session.id, email: session.email, role: session.role, companyId: 1,
+      } });
+    } catch {
+      response.status(503).json({ error: "Google verification temporarily unavailable" });
+    }
+  });
+
+
+
   router.post("/auth/supabase-exchange", async (request, response): Promise<void> => {
     if (isDevelopmentEnvironment()) {
       response.status(404).json({ error: "Not found" });
@@ -439,12 +581,14 @@ export function createDevAuthRouter(): Router {
   });
 
   router.get("/auth/dev-users", (_request, response) => {
-    if (!isDevelopmentEnvironment()) return response.status(404).json({ error: "Not found" });
+    if (!isDevelopmentEnvironment() || isFleetDevGoogleMode())
+      return response.status(404).json({ error: "Not found" });
     return response.json({ users: getDevUsers() });
   });
 
   router.post("/auth/dev-login", async (request, response) => {
-    if (!isDevelopmentEnvironment()) return response.status(404).json({ error: "Not found" });
+    if (!isDevelopmentEnvironment() || isFleetDevGoogleMode())
+      return response.status(404).json({ error: "Not found" });
 
     const email =
       typeof request.body?.email === "string"
@@ -535,6 +679,11 @@ export function createDevAuthRouter(): Router {
       clearProductionSessionCookie(response);
       response.redirect(getSafeRedirect(request.query.redirect));
       return;
+    }
+    if (isFleetDevGoogleMode()) {
+      response.setHeader("Set-Cookie",
+        FLEET_DEV_GOOGLE_COOKIE + "=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
+      return response.redirect(getSafeRedirect(request.query.redirect));
     }
     if (!getDevSession(request)) return next();
 
