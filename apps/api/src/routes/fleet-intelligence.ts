@@ -608,7 +608,10 @@ function parseGojekTransactionCsv(content: string) {
   const parsedRows=csvRows(content);
   if(parsedRows.length<2) return {headers:[] as string[],rows:[] as GojekTransactionRow[],mapping:{} as Record<string,string|null>,warnings:["File tidak memiliki data."]};
   const headers=parsedRows[0].map(h=>h.trim());
-  const normalized=headers.map(h=>h.toLowerCase().replace(/[()]/g,"").replace(/[_-]+/g," ").replace(/\s+/g," ").trim());
+  // Official Gojek exports label the timestamp "Date & Time(JKT)".
+  // Keep its full timestamp as source evidence for no-GoPay dedup, rather
+  // than falling back to the day-only "Date" column.
+  const normalized=headers.map(h=>h.toLowerCase().replace(/[()&]/g," ").replace(/[_-]+/g," ").replace(/\s+/g," ").trim());
   const find=(...names:string[])=>normalized.findIndex(h=>names.includes(h));
   const idx={
     driverName:find("driver name","nama driver","driver"),
