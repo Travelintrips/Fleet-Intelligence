@@ -10,6 +10,7 @@ on:
         default: validate-only
         options:
           - validate-only
+          - gcp-auth-only
           - stage-dev
 
 permissions:
@@ -285,3 +286,44 @@ jobs:
           docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev logs --tail=100
           exit 21
           REMOTE
+
+  gcp-auth-smoke:
+    if: ${{ github.event.inputs.mode == 'gcp-auth-only' }}
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: fleet-dev
+    timeout-minutes: 8
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check scope before requesting GitHub OIDC token
+        env:
+          WIF: ${{ vars.FLEET_DEV_GCP_WIF_PROVIDER }}
+          SA: ${{ vars.FLEET_DEV_GCP_SERVICE_ACCOUNT }}
+          PROJECT: ${{ vars.FLEET_DEV_GCP_PROJECT }}
+          SECRET: ${{ vars.FLEET_DEV_GCP_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/dev/fleet-pr103-pr110-stabilization-20261117"
+          test "$GITHUB_REPOSITORY" = "Travelintrips/Fleet-Intelligence"
+          test "$PROJECT" = "secret-504012"
+          test "$SECRET" = "fleet-intelligence-development"
+          test "$SA" = "fleet-dev-secret-reader@secret-504012.iam.gserviceaccount.com"
+          test "$WIF" = "projects/653506647312/locations/global/workloadIdentityPools/fleet-dev-github/providers/fleet-dev-oidc"
+      - name: Federate GitHub workflow identity (no keys)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.FLEET_DEV_GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.FLEET_DEV_GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.FLEET_DEV_GCP_PROJECT }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Confirm Google token without printing or accessing secret contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud config get-value project)" = "secret-504012"
+          gcloud auth print-access-token >/dev/null
+          echo "PASS Fleet DEV GitHub OIDC to isolated GCP reader; no secrets read, no deploy"
