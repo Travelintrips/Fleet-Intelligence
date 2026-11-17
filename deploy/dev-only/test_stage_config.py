@@ -30,7 +30,7 @@ def sample() -> dict[str, str]:
         "FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID": "00000000-0000-4000-8000-000000000001",
         "FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID": "42",
         "SUPABASE_DATABASE_URL_DEV": (
-            "postgresql://fleet_dev_cst_inventory_reader.xssrfshdrtdfupgqwfdw:fake-not-real@"
+            "postgresql://fleet_dev_stage_reader.xssrfshdrtdfupgqwfdw:fake-not-real@"
             "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require"
         ),
     }
@@ -43,7 +43,7 @@ class StagePreflightTests(unittest.TestCase):
     def test_valid_direct_project_reader(self):
         vals = sample()
         vals["SUPABASE_DATABASE_URL_DEV"] = (
-            "postgresql://fleet_dev_cst_inventory_reader:fake-not-real@"
+            "postgresql://fleet_dev_stage_reader:fake-not-real@"
             "db.xssrfshdrtdfupgqwfdw.supabase.co:5432/postgres?sslmode=require"
         )
         preflight.validate(vals)
@@ -51,16 +51,23 @@ class StagePreflightTests(unittest.TestCase):
     def test_rejects_prod_project(self):
         vals = sample()
         vals["SUPABASE_DATABASE_URL_DEV"] = (
-            "postgresql://fleet_dev_cst_inventory_reader.nzdweipzckfszczzqtuw:fake@"
+            "postgresql://fleet_dev_stage_reader.nzdweipzckfszczzqtuw:fake@"
             "aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require"
         )
         with self.assertRaisesRegex(ValueError, "SELECT-only reader"):
             preflight.validate(vals)
 
+    def test_rejects_reusing_public_fleet_reader_as_stage_login(self):
+        vals = sample()
+        vals["SUPABASE_DATABASE_URL_DEV"] = vals["SUPABASE_DATABASE_URL_DEV"].replace(
+            "fleet_dev_stage_reader.", "fleet_dev_cst_inventory_reader.")
+        with self.assertRaisesRegex(ValueError, "reader"):
+            preflight.validate(vals)
+
     def test_rejects_username_spoofing_host(self):
         vals = sample()
         vals["SUPABASE_DATABASE_URL_DEV"] = (
-            "postgresql://fleet_dev_cst_inventory_reader.xssrfshdrtdfupgqwfdw:fake@"
+            "postgresql://fleet_dev_stage_reader.xssrfshdrtdfupgqwfdw:fake@"
             "not-supabase.example:6543/postgres?sslmode=require"
         )
         with self.assertRaisesRegex(ValueError, "hostname"):
@@ -69,7 +76,7 @@ class StagePreflightTests(unittest.TestCase):
     def test_rejects_writer_role(self):
         vals = sample()
         vals["SUPABASE_DATABASE_URL_DEV"] = vals["SUPABASE_DATABASE_URL_DEV"].replace(
-            "fleet_dev_cst_inventory_reader.", "postgres.")
+            "fleet_dev_stage_reader.", "postgres.")
         with self.assertRaisesRegex(ValueError, "reader"):
             preflight.validate(vals)
 
