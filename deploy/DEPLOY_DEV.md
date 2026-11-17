@@ -28,7 +28,7 @@ Checkout staging harus sudah tersedia di direktori tersebut, berasal dari reposi
 
 Sebelum staging, workflow menolak koneksi DB yang tidak mengarah ke Supabase **CST-DEV** (`xssrfshdrtdfupgqwfdw`) atau tidak menggunakan PostgreSQL role baca-saja `fleet_dev_cst_inventory_reader`.
 
-Mode `stage-dev` hanya memakai Docker Compose project `fleet-integration-stage` dan port loopback **127.0.0.1:18460**. `CENTRAL_FINANCE_WRITE_ENABLED=false` dan `DISABLE_BACKGROUND_SCHEDULERS=true` dipaksakan oleh `deploy/docker-compose.dev.yml`. Tidak ada `--remove-orphans`.
+Mode `stage-dev` hanya memakai Docker Compose project `fleet-integration-stage` dan port loopback **127.0.0.1:18460**. `CENTRAL_FINANCE_WRITE_ENABLED=false`, `GOJEK_CONNECTOR_ENABLED=false`, dan `DISABLE_BACKGROUND_SCHEDULERS=true` dipaksakan oleh `deploy/docker-compose.dev.yml`. Tidak ada `--remove-orphans`. Pengujian sintetis sengaja memasang `GOJEK_CONNECTOR_ENABLED=true` di file contoh untuk memastikan override Compose tetap menonaktifkan endpoint handoff (HTTP 409), tanpa pernah mengirim data atau menggunakan kredensial nyata.
 
 Container dan network staging memakai nama otomatis yang dibatasi oleh Compose project (tidak memakai `container_name` atau network global `cst-fleet-dev`). Dengan demikian, `stage-dev` tidak dapat mengambil alih container Fleet DEV lain akibat benturan nama. Pengecekan konfigurasi Compose dan tes regresi DEV memverifikasi batasan ini.
 
