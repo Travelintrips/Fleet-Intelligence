@@ -29,6 +29,11 @@ jobs:
       BASE_URL: ${{ vars.FLEET_PROD_BASE_URL || 'https://fleet.cstlogistic.co.id' }}
       EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
+      - name: Checkout exact Fleet release commit for local verification script
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - name: Wait for Fleet production
         shell: bash
         run: |
