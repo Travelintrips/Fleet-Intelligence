@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 PROJECT = "xssrfshdrtdfupgqwfdw"
-ROLE = "fleet_dev_cst_inventory_reader"
+ROLE = "fleet_dev_stage_reader"
 ORIGIN = "https://dev-fleet.cstlogistic.co.id"
 
 
