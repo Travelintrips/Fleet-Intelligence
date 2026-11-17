@@ -22,6 +22,8 @@ Workflow versi branch DEV **menolak** eksekusi bila `github.ref` tidak cocok den
 
 Environment GitHub Actions: `fleet-dev`. Secret yang diperlukan untuk mode `stage-dev`:
 
+**Pengaman baru:** `validate-only` menguji preflight konfigurasi staging secara offline (17 kasus sintetis). Sebelum memulai Docker, `stage-dev` menjalankan `deploy/dev-only/check-stage-config.py` dan menolak konfigurasi nonprivat, target database salah, koneksi tidak terenkripsi, writer aktif, atau otorisasi Google yang tidak lengkap. Tidak mencetak kredensial. Ikuti [checklist staging berwenang](dev-only/STAGE_CONFIG_CHECKLIST.md); preflight bukan bukti login Google asli sudah PASS.
+
 - `HOSTINGER_SSH_HOST`, `HOSTINGER_SSH_PORT`, `HOSTINGER_SSH_USER`
 - `HOSTINGER_SSH_PRIVATE_KEY`, `HOSTINGER_SSH_KNOWN_HOSTS`
 - `FLEET_DEV_DEPLOY_PATH` **harus** `/opt/fleet-intelligence-dev`

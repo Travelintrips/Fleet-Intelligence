@@ -46,6 +46,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Test dedicated Fleet DEV staging configuration guard (synthetic data only)
+        run: python3 -m unittest discover -s deploy/dev-only -p 'test_stage_config.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -252,24 +254,8 @@ jobs:
           git checkout --detach "$EXPECTED_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
-          # Verify DB target + limited SELECT-only reader without exposing credentials.
-          python3 - <<'PY'
-          from pathlib import Path
-          from urllib.parse import urlsplit
-          lines=Path("deploy/.env.dev").read_text().splitlines()
-          data={}
-          for line in lines:
-              if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
-                  continue
-              k,v=line.split("=",1)
-              data[k.strip()]=v.strip().strip("'\\\"")
-          db=data.get("SUPABASE_DATABASE_URL_DEV","")
-          parsed=urlsplit(db)
-          identity=(parsed.username or "")+" "+(parsed.hostname or "")
-          assert "xssrfshdrtdfupgqwfdw" in identity and "nzdweipzckfszczzqtuw" not in identity, "Wrong DEV database"
-          assert "fleet_dev_cst_inventory_reader" in (parsed.username or ""), "DEV reader must be SELECT only"
-          print("CST-DEV project and reader-role configuration PASS")
-          PY
+          # Fail closed before Docker, without printing credentials or reading live runtime.
+          python3 deploy/dev-only/check-stage-config.py deploy/.env.dev
 
           # Isolated 18460 staging only. No Nginx cutover or orphan cleanup.
           docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --build
