@@ -127,6 +127,18 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(checkScript).not.toContain('"Cookie":');
   });
 
+  it("uses exact CI-tested images on VPS and never pulls Docker Hub during stage-dev", () => {
+    expect(workflow).toContain("Export exact CI-built Fleet staging images");
+    expect(workflow).toContain("fleet-integration-stage-fleet-api:latest");
+    expect(workflow).toContain("fleet-integration-stage-fleet-web:latest");
+    expect(workflow).toContain("fleet-dev-stage-images-${{ github.sha }}");
+    expect(workflow).toContain("sha256sum -c fleet-stage-images.tar.gz.sha256");
+    expect(workflow).toContain("gzip -dc deploy/fleet-stage-images.tar.gz | docker load");
+    expect(workflow).toContain("up -d --no-build --pull never");
+    expect(workflow).toContain("127.0.0.1:18460");
+    expect(workflow).not.toMatch(/^\s*docker pull\b/m);
+  });
+
   it("keeps public Nginx and Fleet PROD outside the staging workflow", () => {
     expect(workflow).toContain('refs/heads/dev/fleet-pr103-pr110-stabilization-20261117');
     expect(workflow).toContain("github.event.inputs.mode == 'stage-dev'");
