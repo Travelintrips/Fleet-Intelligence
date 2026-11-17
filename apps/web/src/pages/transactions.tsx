@@ -1,5 +1,6 @@
 import { DatePicker } from "@/components/ui/date-picker";
 import { initialFleetTransactionDateRange, fleetTransactionQueryParams } from "@/lib/fleet-transaction-date";
+import { buildFleetTransactionsCsv, getAllFilteredFleetTransactions } from "@/lib/fleet-transaction-export";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
@@ -35,6 +36,9 @@ export default function FleetTransactionsPage() {
   const [vehiclePlateApplied, setVehiclePlateApplied] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [exportedCount, setExportedCount] = useState<number | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["fleet-transactions", startDate, endDate, page, pageSize, driverSearchApplied, vehiclePlateApplied],
@@ -86,21 +90,38 @@ export default function FleetTransactionsPage() {
 
   const hasActiveFilters = driverSearchApplied || vehiclePlateApplied;
 
-  function exportCsv() {
-    const cols = ["Tanggal", "Nama Driver", "Plat", "Layanan", "Trip", feeLedgerOnly ? "Tagihan Sewa" : "Gross Revenue", "Insentif", "Komisi", "Potongan", feeLedgerOnly ? "Nilai Biaya Sewa" : "Net Revenue", "Outstanding", "PPN Rate", "PPN Amount"];
-    const rows = transactions.map((t) => [
-      t.transaction_date, t.driver_name, t.vehicle_plate,
-      t.service_type, t.trip_count, t.gross_revenue, t.incentive, t.commission,
-      t.deduction, t.net_revenue, t.outstanding_balance, t.ppn_rate, t.ppn_amount,
-    ].map((v) => `"${v ?? ""}"`).join(","));
-    const csv = [cols.join(","), ...rows].join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `fleet_transactions_${startDate}_${endDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function exportCsv() {
+    if (isExporting || isLoading || isError) return;
+    setIsExporting(true);
+    setExportError("");
+    setExportedCount(null);
+    try {
+      const rows = await getAllFilteredFleetTransactions({
+        startDate, endDate,
+        driverSearch: driverSearchApplied,
+        vehiclePlate: vehiclePlateApplied,
+      });
+      // Avoid offering a complete-looking CSV if the displayed count went stale.
+      if (rows.length !== Number(summary.total ?? 0)) {
+        throw new Error("Jumlah transaksi berubah sejak halaman dibuka; muat ulang lalu ekspor kembali");
+      }
+      const csv = buildFleetTransactionsCsv(rows, feeLedgerOnly);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      try {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `fleet_transactions_${startDate || "semua"}_${endDate || "semua"}.csv`;
+        a.click();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      setExportedCount(rows.length);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Gagal mengekspor transaksi");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -116,10 +137,26 @@ export default function FleetTransactionsPage() {
             <h1 className="text-2xl font-bold text-white">Transaksi Fleet</h1>
             <p className="text-slate-400 text-sm mt-1">Rincian transaksi harian per driver</p>
           </div>
-          <Button variant="outline" size="sm" className="gap-2 border-slate-600" onClick={exportCsv}>
-            <Download className="w-4 h-4" /> Export CSV
+          <Button
+            variant="outline" size="sm" className="gap-2 border-slate-600"
+            onClick={() => void exportCsv()}
+            disabled={isExporting || isLoading || isError || Number(summary.total ?? 0) === 0}
+          >
+            <Download className="w-4 h-4" />
+            {isExporting ? "Menyiapkan CSV..." : "Export CSV (semua hasil filter)"}
           </Button>
         </div>
+
+        {exportError && (
+          <p role="alert" className="text-sm text-amber-200">
+            Ekspor CSV dibatalkan: {exportError}. Tidak ada file parsial dibuat.
+          </p>
+        )}
+        {exportedCount !== null && (
+          <p role="status" className="text-sm text-slate-400">
+            CSV berisi {fmtNum(exportedCount)} transaksi driver aktif sesuai filter, bukan hanya halaman yang sedang terlihat.
+          </p>
+        )}
 
         {/* Filter */}
         <Card className="bg-slate-800/60 border-slate-700">
