@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 // against the 425-row official source import on CST-DEV using read-only SQL.
 const api = readFileSync(resolve(process.cwd(), "src/routes/fleet-intelligence.ts"), "utf8");
 const page = readFileSync(resolve(process.cwd(), "../web/src/pages/transactions.tsx"), "utf8");
+const csvExport = readFileSync(resolve(process.cwd(), "../web/src/lib/fleet-transaction-export.ts"), "utf8");
 const route = api.split('router.get("/transactions"')[1]?.split('router.get("/drivers"')[0];
 
 describe("Fleet DEV rental fee source integrity and eligibility visibility", () => {
@@ -57,6 +58,8 @@ describe("Fleet DEV rental fee source integrity and eligibility visibility", () 
     expect(page).toContain("bukan pendapatan perjalanan GoCar");
     expect(page).toContain("Pergerakan Biaya Sewa Bersih");
     expect(page).toContain("Tagihan Biaya Sewa");
-    expect(page).toContain('feeLedgerOnly ? "Tagihan Sewa" : "Gross Revenue"');
+    expect(page).toContain("buildFleetTransactionsCsv(rows, feeLedgerOnly)");
+    expect(csvExport).toContain('feeLedgerOnly ? "Tagihan Sewa" : "Gross Revenue"');
+    expect(csvExport).toContain('feeLedgerOnly ? "Nilai Biaya Sewa" : "Net Revenue"');
   });
 });
