@@ -190,6 +190,9 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     environment: fleet-dev
+    permissions:
+      contents: read
+      id-token: write
     env:
       SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
       SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
@@ -215,6 +218,38 @@ jobs:
           # Do not let a misconfigured Fleet DEV secret target an arbitrary or PROD directory.
           test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"
 
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact staged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Obtain GCP token for dedicated Fleet DEV secret
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.FLEET_DEV_GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.FLEET_DEV_GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.FLEET_DEV_GCP_PROJECT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Fetch and validate dedicated Fleet DEV config (no secret output)
+        shell: bash
+        env:
+          GCP_PROJECT: ${{ vars.FLEET_DEV_GCP_PROJECT }}
+          GCP_SECRET: ${{ vars.FLEET_DEV_GCP_SECRET }}
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT" = "secret-504012"
+          test "$GCP_SECRET" = "fleet-intelligence-development"
+          umask 077
+          stage_file="$RUNNER_TEMP/fleet-dev-stage.env"
+          rm -f "$stage_file"
+          gcloud secrets versions access latest --project="$GCP_PROJECT" --secret="$GCP_SECRET" > "$stage_file"
+          chmod 600 "$stage_file"
+          python3 deploy/dev-only/check-stage-config.py "$stage_file"
+          echo "PASS GCP Fleet DEV config preflight; no contents logged"
+
       - name: Configure SSH
         shell: bash
         run: |
@@ -224,6 +259,16 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer validated GCP stage config to isolated VPS path
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/fleet-dev-stage.env"
+          scp -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -P "$SSH_PORT" \
+            "$RUNNER_TEMP/fleet-dev-stage.env" \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/deploy/.env.dev.next"
+          echo "PASS dedicated stage file transferred via pinned SSH; not public deployment"
 
       - name: Deploy DEV over SSH
         shell: bash
@@ -237,10 +282,9 @@ jobs:
           test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
 
-          # Secrets must already exist at the dedicated staging checkout.
-          # Never copy secrets from PROD or from the healthy public DEV canary.
-          if [ ! -f "$DEPLOY_PATH/deploy/.env.dev" ]; then
-            echo "Dedicated Fleet DEV configuration missing; stage aborted."
+          # GCP is the source of truth. Reject missing upload; never borrow live credentials.
+          if [ ! -f "$DEPLOY_PATH/deploy/.env.dev.next" ]; then
+            echo "Dedicated GCP Fleet DEV stage upload missing; stage aborted."
             exit 20
           fi
           cd "$DEPLOY_PATH"
@@ -255,7 +299,11 @@ jobs:
           git checkout --detach "$EXPECTED_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
-          # Fail closed before Docker, without printing credentials or reading live runtime.
+          # Validate uploaded file again on the exact staged commit before atomic promotion.
+          chmod 600 deploy/.env.dev.next
+          python3 deploy/dev-only/check-stage-config.py deploy/.env.dev.next
+          mv -f deploy/.env.dev.next deploy/.env.dev
+          chmod 600 deploy/.env.dev
           python3 deploy/dev-only/check-stage-config.py deploy/.env.dev
 
           # Isolated 18460 staging only. No Nginx cutover or orphan cleanup.
@@ -286,6 +334,11 @@ jobs:
           docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev logs --tail=100
           exit 21
           REMOTE
+
+      - name: Destroy temporary runner copy of Fleet DEV config
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/fleet-dev-stage.env"
 
   gcp-auth-smoke:
     if: ${{ github.event.inputs.mode == 'gcp-auth-only' }}
