@@ -11,7 +11,7 @@ Branch integrasi Fleet DEV yang telah lulus E2E:
 Buka **Actions → Deploy Fleet DEV — pinned integration branch → Run workflow**:
 
 1. Pilih branch `dev/fleet-pr103-pr110-stabilization-20261117`, **bukan** `main`.
-2. Pilih `validate-only` (default) untuk checkout commit persis yang dipilih, typecheck, test, build, dan pemeriksaan Docker. Tidak ada SSH, deploy, atau perubahan server.
+2. Pilih `validate-only` (default) untuk checkout commit persis yang dipilih, typecheck, test, build, dan pemeriksaan Docker. GitHub Actions juga menjalankan **smoke test sementara Docker Compose web→API** dengan konfigurasi sintetis (tanpa DB/Google/WA/Gojek/Finance asli), lalu menghapus container/network dan file konfigurasi uji. Pengujiannya membuktikan web/API HTTP 200, redirect API lokal 308 tanpa header HTTPS, dan autentikasi anonim HTTP 401. Tidak ada SSH, deploy ke VPS, atau perubahan server.
 3. `stage-dev` hanya jika benar-benar ingin membuat/memperbarui **kandidat terpisah** di VPS; butuh konfigurasi staging yang disiapkan khusus.
 
 Workflow versi branch DEV **menolak** eksekusi bila `github.ref` tidak cocok dengan branch integrasi tersebut, dan mencocokkan commit `github.sha` sampai ke checkout di VPS. File workflow pada branch `main` masih versi lama; jangan memilih `main` saat menjalankan workflow. Hanya workflow DEV branch ini yang memiliki pengaman tersebut.
