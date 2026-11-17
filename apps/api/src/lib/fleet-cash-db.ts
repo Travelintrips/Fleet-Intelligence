@@ -32,17 +32,15 @@ export function fleetCashPoolOptions(raw: string): pg.PoolConfig {
       !["require", "verify-ca", "verify-full"].includes(url.searchParams.get("sslmode") ?? "")) {
     throw new Error("FLEET_CASH_DEV_DATABASE_IDENTITY_INVALID");
   }
-  let ca: string | undefined;
-  if (direct) {
-    const cert = new X509Certificate(SUPABASE_FINANCE_ROOT_2021_PEM);
-    if (!cert.ca || cert.fingerprint256 !== SUPABASE_FINANCE_ROOT_2021_FINGERPRINT256) {
-      throw new Error("FLEET_CASH_DEV_CA_INVALID");
-    }
-    ca = SUPABASE_FINANCE_ROOT_2021_PEM;
+  // Both the verified direct endpoint and project pooler use this public trust anchor.
+  const cert = new X509Certificate(SUPABASE_FINANCE_ROOT_2021_PEM);
+  if (!cert.ca || cert.fingerprint256 !== SUPABASE_FINANCE_ROOT_2021_FINGERPRINT256) {
+    throw new Error("FLEET_CASH_DEV_CA_INVALID");
   }
+  const ca = SUPABASE_FINANCE_ROOT_2021_PEM;
   return {
     host, port, user, password: decodeURIComponent(url.password), database: "postgres",
-    ssl: { rejectUnauthorized: true, servername: host, ...(ca ? { ca } : {}) },
+    ssl: { rejectUnauthorized: true, servername: host, ca },
     max: 2, connectionTimeoutMillis: 8000, idleTimeoutMillis: 5000,
     query_timeout: 20000, application_name: "fleet-cash-source-dev",
   };

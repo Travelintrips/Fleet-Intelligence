@@ -26,10 +26,10 @@ describe("Dedicated Fleet cash source connection", () => {
     expect((options.ssl as { ca: string }).ca).toContain("BEGIN CERTIFICATE");
     expect(options).not.toHaveProperty("connectionString");
   });
-  it("uses system-trusted TLS for the exact project-qualified pooler identity", () => {
+  it("pins the verified Supabase CA and hostname for the exact project-qualified pooler identity", () => {
     const options = fleetCashPoolOptions("postgresql://fleet_cash_source_login_dev.xssrfshdrtdfupgqwfdw:synthetic@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres?sslmode=require");
-    expect(options).toMatchObject({ max: 2, ssl: { rejectUnauthorized: true } });
-    expect(options.ssl).not.toHaveProperty("ca");
+    expect(options).toMatchObject({ max: 2, ssl: { rejectUnauthorized: true, servername: "aws-1-ap-southeast-2.pooler.supabase.com" } });
+    expect((options.ssl as { ca: string }).ca).toBe((fleetCashPoolOptions(direct).ssl as { ca: string }).ca);
   });
   it.each([
     direct.replace("fleet_cash_source_login_dev", "postgres"),

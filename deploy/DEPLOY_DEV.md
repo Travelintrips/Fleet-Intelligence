@@ -101,7 +101,7 @@ Setelah review dan pengujian kandidat, overlay `deploy/docker-compose.dev-cash.y
 Konfigurasi privat tambahan disediakan server melalui alur secret yang berwenang:
 
 - `FLEET_CASH_DATABASE_ENABLED_DEV=true`
-- `FLEET_CASH_DATABASE_URL_DEV`: kredensial khusus `fleet_cash_source_login_dev` pada CST-DEV. Pool hanya dipakai pembayaran/outstanding company 1; reader inventori tidak diganti. Direct TLS memakai public CA Supabase yang dipin; pooler memakai CA sistem dengan verifikasi host. Credential yang berubah memerlukan restart terkontrol.
+- `FLEET_CASH_DATABASE_URL_DEV`: kredensial khusus `fleet_cash_source_login_dev` pada CST-DEV. Pool hanya dipakai pembayaran/outstanding company 1; reader inventori tidak diganti. Direct dan pooler TLS memakai public CA Supabase Root 2021 yang sama, dengan fingerprint, certificate chain, dan hostname tetap diverifikasi. Trust anchor ini telah diverifikasi terhadap pooler CST-DEV yang sebenarnya; tidak ada fallback TLS tidak aman. Credential yang berubah memerlukan restart terkontrol.
 - `FLEET_FINANCE_COMPANY_MAP={"1":3}`
 - `CENTRAL_FINANCE_BASE_URL=http://fleet-finance-dev:19888`, receiver canonical yang privat pada network DEV yang sama, tanpa port publik.
 - `CENTRAL_FINANCE_SERVICE_TOKEN`: token khusus yang cocok dengan `FLEET_FINANCE_SERVICE_TOKEN` receiver.
