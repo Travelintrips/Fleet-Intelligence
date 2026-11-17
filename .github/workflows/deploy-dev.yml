@@ -61,6 +61,79 @@ jobs:
         run: docker build -t fleet-api-dev-check apps/api
       - name: Docker build web
         run: docker build -t fleet-web-dev-check apps/web
+      - name: Synthetic staged Compose HTTP E2E (no real credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/dev/fleet-pr103-pr110-stabilization-20261117"
+          test ! -e deploy/.env.dev
+          umask 077
+          # These are intentionally fake. The database host is nonroutable
+          # and no production, Google, Gojek, WA or Finance credentials are used.
+          cat > deploy/.env.dev <<'SYNTHETIC'
+          APP_ENV=development
+          APP_BASE_URL=https://dev-fleet.cstlogistic.co.id
+          SUPABASE_DATABASE_URL_DEV=postgresql://fleet_dev_cst_inventory_reader.xssrfshdrtdfupgqwfdw:synthetic@127.0.0.1:65432/synthetic_no_db
+          SESSION_SECRET=synthetic_fleet_stage_http_only_not_real_secret_2026
+          FLEET_DEV_GOOGLE_AUTH_ENABLED=true
+          FLEET_DEV_SUPABASE_PUBLISHABLE_KEY=sb_publishable_synthetic_only
+          FLEET_DEV_GOOGLE_ALLOWED_AUTH_UID=00000000-0000-4000-8000-000000000001
+          FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID=42
+          DISABLE_BACKGROUND_SCHEDULERS=true
+          CENTRAL_FINANCE_WRITE_ENABLED=false
+          GOJEK_CONNECTOR_ENABLED=false
+          SYNTHETIC
+          cleanup() {
+            docker compose --project-name fleet-integration-stage \
+              -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev \
+              down --volumes >/dev/null 2>&1 || true
+            rm -f deploy/.env.dev
+          }
+          trap cleanup EXIT
+          docker compose --project-name fleet-integration-stage \
+            -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev \
+            up -d --build
+          ready=false
+          for attempt in $(seq 1 45); do
+            web_code=$(curl --silent --connect-timeout 2 --max-time 4 \
+              --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:18460/healthz || true)
+            api_code=$(curl --silent --connect-timeout 2 --max-time 4 \
+              --header 'X-Forwarded-Proto: https' \
+              --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:18460/api/healthz || true)
+            if [ "$web_code" = 200 ] && [ "$api_code" = 200 ]; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            docker compose --project-name fleet-integration-stage \
+              -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev \
+              logs --tail=40
+            echo "::error::Synthetic staging never reached web/API HTTP 200/200"
+            exit 1
+          fi
+          plain_code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/healthz)
+          auth_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/auth/user)
+          tx_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/logistics/fleet/transactions)
+          vehicles_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/logistics/fleet-intelligence/vehicles)
+          tx_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/logistics/fleet-intelligence/transactions)
+          test "$plain_code" = 308
+          test "$auth_code" = 401
+          test "$tx_code" = 401
+          test "$vehicles_page" = 200
+          test "$tx_page" = 200
+          echo "Synthetic Compose proxy E2E PASS: web=200 api=200 plain=308 anonymous=401/401 pages=200/200"
+
 
   deploy:
     if: ${{ github.event.inputs.mode == 'stage-dev' }}
