@@ -22,6 +22,7 @@ describe("Fleet DEV staging Compose isolation", () => {
   it("keeps the second deployment loopback only and disables writes/schedulers", () => {
     expect(compose).toContain('"127.0.0.1:18460:80"');
     expect(compose).toContain('CENTRAL_FINANCE_WRITE_ENABLED: "false"');
+    expect(compose).toContain('GOJEK_CONNECTOR_ENABLED: "false"');
     expect(compose).toContain('DISABLE_BACKGROUND_SCHEDULERS: "true"');
     expect(compose).not.toContain("--remove-orphans");
     expect(workflow).not.toContain("--remove-orphans");
@@ -47,6 +48,7 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(workflow).toContain('test "$plain_code" = 308');
     expect(workflow).toContain('test "$auth_code" = 401');
     expect(workflow).toContain('test "$tx_code" = 401');
+    expect(workflow).toContain('test "$gojek_code" = 409');
     expect(workflow).toContain('test "$vehicles_page" = 200');
     expect(workflow).toContain('test "$tx_page" = 200');
     expect(workflow).toContain('test ! -e deploy/.env.dev');
