@@ -54,6 +54,8 @@ jobs:
           node-version: "22"
       - name: Install
         run: npm install --ignore-scripts --package-lock=false
+      - name: Check isolated staging DB smoke syntax
+        run: node --check deploy/dev-only/check-fleet-dev-stage-db.cjs
       - name: Typecheck
         run: npm run typecheck
       - name: Test
@@ -324,6 +326,10 @@ jobs:
               http://127.0.0.1:18460/api/healthz || true)
             if [ "$web_code" = "200" ] && [ "$api_code" = "200" ]; then
               docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev ps
+              # Verify actual staging DB role, company RLS, and write denial.
+              # The script queries via the credential already inside the stage API container.
+              docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev exec -T fleet-api \
+                node -e "$(cat deploy/dev-only/check-fleet-dev-stage-db.cjs)"
               exit 0
             fi
             echo "Staging readiness pending: web=$web_code api=$api_code (requires 200/200)"
