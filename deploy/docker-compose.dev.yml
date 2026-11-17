@@ -25,6 +25,10 @@ services:
       context: ../apps/web
     depends_on:
       - fleet-api
+    # Isolated DEV stage may expose only audited, GET-only Fleet paths.
+    # This mount does not modify the shared web Docker image or PROD config.
+    volumes:
+      - ./dev-only/nginx-staging-readonly.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "127.0.0.1:18460:80"
     restart: unless-stopped
