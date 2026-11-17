@@ -1,6 +1,7 @@
 import { DatePicker } from "@/components/ui/date-picker";
 import { initialFleetTransactionDateRange, fleetTransactionQueryParams } from "@/lib/fleet-transaction-date";
 import { buildFleetTransactionsCsv, getAllFilteredFleetTransactions } from "@/lib/fleet-transaction-export";
+import { fleetTransactionPageState } from "@/lib/fleet-transaction-pagination";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
@@ -66,6 +67,7 @@ export default function FleetTransactionsPage() {
 
   const transactions = data?.transactions ?? [];
   const summary = data?.summary ?? {};
+  const pagination = fleetTransactionPageState(summary.total, page, pageSize);
   const sourceStatus = data?.sourceStatus;
   const noSourceData = sourceStatus?.state === "no_source_data";
   const hasSourceCoverage = Boolean(sourceStatus?.firstAvailableDate && sourceStatus?.lastAvailableDate);
@@ -385,9 +387,9 @@ export default function FleetTransactionsPage() {
                   <option value={25}>25 / halaman</option>
                   <option value={50}>50 / halaman</option>
                 </select>
-                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
-                <span className="px-3 py-1 text-slate-400 text-sm">Hal. {page}</span>
-                <Button variant="outline" size="sm" disabled={transactions.length < pageSize} onClick={() => setPage((p) => p + 1)}>Next</Button>
+                <Button variant="outline" size="sm" disabled={isLoading || isError || !pagination.hasPrevious} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+                <span className="px-3 py-1 text-slate-400 text-sm">Hal. {page} dari {pagination.totalPages}</span>
+                <Button variant="outline" size="sm" disabled={isLoading || isError || !pagination.hasNext} onClick={() => setPage((p) => p + 1)}>Next</Button>
               </div>
             </div>
           </CardContent>
