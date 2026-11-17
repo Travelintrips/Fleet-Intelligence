@@ -174,6 +174,13 @@ jobs:
           test "$tx_page" = 200
           echo "Synthetic Compose proxy E2E PASS: web/api=200/200 plain=308 anonymous=401/401 stage-write-block=404/404/404/403 direct-gojek-disabled=409 pages=200/200"
 
+      - name: Public Fleet DEV read-only OAuth and API smoke (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/dev/fleet-pr103-pr110-stabilization-20261117"
+          python3 deploy/dev-only/check-fleet-dev-public-readonly.py
+
 
   deploy:
     if: ${{ github.event.inputs.mode == 'stage-dev' }}
