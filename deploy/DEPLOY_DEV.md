@@ -32,6 +32,8 @@ Mode `stage-dev` hanya memakai Docker Compose project `fleet-integration-stage` 
 
 Container dan network staging memakai nama otomatis yang dibatasi oleh Compose project (tidak memakai `container_name` atau network global `cst-fleet-dev`). Dengan demikian, `stage-dev` tidak dapat mengambil alih container Fleet DEV lain akibat benturan nama. Pengecekan konfigurasi Compose dan tes regresi DEV memverifikasi batasan ini.
 
+**Health check staging harus HTTP 200/200.** Karena API menerapkan HTTPS di belakang reverse proxy, probe `/api/healthz` pada port HTTP lokal tanpa header proxy akan mengembalikan redirect 308. Workflow meneruskan `X-Forwarded-Proto: https` hanya pada pemeriksaan API localhost dan memvalidasi kode HTTP **200 secara tepat** untuk `/healthz` (web) dan `/api/healthz` (API). Redirect 308 bukan bukti API siap.
+
 **Workflow tidak melakukan cutover Nginx.** Public Fleet DEV tetap menggunakan rute yang sudah diverifikasi, dan tidak ada deploy ke Fleet PROD.
 
 ## Baseline yang wajib dipertahankan
