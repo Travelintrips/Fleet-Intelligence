@@ -29,6 +29,8 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(compose).toContain('CENTRAL_FINANCE_WRITE_ENABLED: "false"');
     expect(compose).toContain('GOJEK_CONNECTOR_ENABLED: "false"');
     expect(compose).toContain('DISABLE_BACKGROUND_SCHEDULERS: "true"');
+    // Dedicated stage role is limited to 3 connections; never default to a 10-slot pool.
+    expect(compose).toContain('DB_POOL_MAX: "2"');
     expect(compose).not.toContain("--remove-orphans");
     expect(workflow).not.toContain("--remove-orphans");
     expect(workflow).toContain('test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"');
