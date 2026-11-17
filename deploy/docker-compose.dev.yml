@@ -1,6 +1,9 @@
+# DEV-only Compose. Container and network names are automatically scoped to
+# the Compose project (for workflow staging: fleet-integration-stage).
+# Never assign global container_name or networks.*.name: they can collide with
+# public Fleet DEV or another independent staging environment.
 services:
   fleet-api:
-    container_name: cst-fleet-api-dev
     build:
       context: ../apps/api
     env_file:
@@ -17,7 +20,6 @@ services:
       - fleet-dev
 
   fleet-web:
-    container_name: cst-fleet-web-dev
     build:
       context: ../apps/web
     depends_on:
@@ -29,5 +31,4 @@ services:
       - fleet-dev
 
 networks:
-  fleet-dev:
-    name: cst-fleet-dev
+  fleet-dev: {}
