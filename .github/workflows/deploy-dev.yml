@@ -124,11 +124,40 @@ jobs:
           tx_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
             --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:18460/api/logistics/fleet/transactions)
+          # Staging web Nginx must block all Gojek write routes at the
+          # perimeter, even when a misleading synthetic env flag is set.
           gojek_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
             --header 'Content-Type: application/json' \
             --request POST --data '{}' \
             --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:18460/api/logistics/fleet/gojek-connector/handoff)
+          upload_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --header 'Content-Type: application/json' \
+            --request POST --data '{}' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/logistics/fleet/reports/upload)
+          wa_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --header 'Content-Type: application/json' \
+            --request POST --data '{}' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/logistics/fleet/outstanding/wa-blast)
+          transaction_post_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --header 'Content-Type: application/json' \
+            --request POST --data '{}' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/logistics/fleet/transactions)
+          # The app itself separately rejects Gojek handoff (409).
+          # Docker exec stays inside the ephemeral CI stage, no real secrets.
+          direct_gojek_code=$(docker compose --project-name fleet-integration-stage \
+            -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev \
+            exec -T fleet-api node -e '
+              fetch("http://127.0.0.1:8080/api/logistics/fleet/gojek-connector/handoff", {
+                method: "POST", headers: {
+                  "Content-Type": "application/json", "X-Forwarded-Proto": "https"
+                }, body: "{}", signal: AbortSignal.timeout(5000)
+              }).then(r => process.stdout.write(String(r.status)))
+                .catch(() => process.exit(1))
+            ')
           vehicles_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:18460/logistics/fleet-intelligence/vehicles)
           tx_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -136,10 +165,14 @@ jobs:
           test "$plain_code" = 308
           test "$auth_code" = 401
           test "$tx_code" = 401
-          test "$gojek_code" = 409
+          test "$gojek_code" = 404
+          test "$upload_code" = 404
+          test "$wa_code" = 404
+          test "$transaction_post_code" = 403
+          test "$direct_gojek_code" = 409
           test "$vehicles_page" = 200
           test "$tx_page" = 200
-          echo "Synthetic Compose proxy E2E PASS: web=200 api=200 plain=308 anonymous=401/401 gojek-disabled=409 pages=200/200"
+          echo "Synthetic Compose proxy E2E PASS: web/api=200/200 plain=308 anonymous=401/401 stage-write-block=404/404/404/403 direct-gojek-disabled=409 pages=200/200"
 
 
   deploy:
