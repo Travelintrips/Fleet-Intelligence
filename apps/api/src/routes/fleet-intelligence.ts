@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
+import { fleetCashPool, isFleetCashDevEnabled } from "../lib/fleet-cash-db";
+import { requireFleetCashDevAccess } from "../lib/fleet-cash-dev-access";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
@@ -417,6 +419,7 @@ router.post("/gojek-connector/worker/fail", async (req, res) => {
 router.use((req, res, next) => {
   void authenticateAdmin(req as AdminRequest, res, next);
 });
+router.use("/cash-payments", requireFleetCashDevAccess);
 
 type SnapshotRow = {
   driver_name: string;
@@ -3142,6 +3145,16 @@ router.put("/reminder-settings", async (req: AdminRequest, res) => {
   }
 });
 
+router.get("/cash-payments/settings", async (req: AdminRequest, res) => {
+  try {
+    const settings = await getFleetAccountingSettings(companyId(req));
+    res.json({ ok: true, ...settings, settingsReadOnly: isFleetCashDevEnabled(), source: "central_finance" });
+  } catch (error) {
+    req.log.error({ error }, "Fleet cash accounting settings failed");
+    res.status(503).json({ error: "Pengaturan Finance Fleet belum tersedia." });
+  }
+});
+
 router.get("/cash-payments", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
@@ -3152,7 +3165,7 @@ router.get("/cash-payments", async (req: AdminRequest, res) => {
     const status = typeof req.query.status === "string" ? req.query.status.trim() : "";
     const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 3650);
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-    const result = await pool.query(
+    const result = await fleetCashPool.query(
       `SELECT cp.*, fo.outstanding_amount AS remaining_outstanding
          FROM public.fleet_cash_payments cp
          LEFT JOIN public.fleet_outstanding fo ON fo.id=cp.outstanding_id AND fo.company_id=cp.company_id
@@ -3177,7 +3190,7 @@ router.get("/cash-payments/summary", async (req: AdminRequest, res) => {
       res.json({ totals: { thisMonthTotal: 0, cancelledTotal: 0, postedTotal: 0, cancelledCount: 0, confirmedCount: 0, postedCount: 0 } });
       return;
     }
-    const result = await pool.query(
+    const result = await fleetCashPool.query(
       `SELECT
           COALESCE(SUM(amount) FILTER (WHERE date_trunc('month',payment_date)=date_trunc('month',CURRENT_DATE) AND status<>'cancelled'),0)::numeric AS this_month_total,
           COALESCE(SUM(amount) FILTER (WHERE status='cancelled'),0)::numeric AS cancelled_total,
@@ -3205,7 +3218,6 @@ router.get("/cash-payments/summary", async (req: AdminRequest, res) => {
 
 router.post("/cash-payments", async (req: AdminRequest, res) => {
   try {
-    await ensureFleetTables();
     const cid = companyId(req);
     if (!(await tableExists("fleet_cash_payments"))) {
       res.status(503).json({ error: "Tabel pembayaran fleet belum tersedia." });

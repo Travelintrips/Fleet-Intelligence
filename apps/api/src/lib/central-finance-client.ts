@@ -74,6 +74,10 @@ function clientConfig(options: { requireToken?: boolean } = {}) {
 
 async function request(path: string, init: RequestInit = {}): Promise<Json> {
   const cfg = clientConfig({ requireToken: true });
+  if (process.env.APP_ENV === "development" && process.env.FLEET_CASH_DATABASE_ENABLED_DEV === "true" &&
+      cfg.baseUrl !== "http://fleet-finance-dev:19888") {
+    throw new Error("Fleet cash DEV harus memakai receiver Finance privat yang disetujui.");
+  }
   const response = await fetch(`${cfg.baseUrl}${path}`, {
     ...init,
     headers: {
@@ -147,6 +151,8 @@ export async function getFleetAccountingSettings(companyId: number) {
     fleetCashAccountId: Number(result.fleetCashAccountId) || null,
     fleetDriverReceivableAccountId: Number(result.fleetDriverReceivableAccountId) || null,
     journalId: Number(result.journalId) || null,
+    ...(typeof result.writeEnabled === "boolean" ? { receiverWriteEnabled: result.writeEnabled } : {}),
+    ...(typeof result.writeReady === "boolean" ? { receiverWriteReady: result.writeReady } : {}),
     ...(scope.mapped ? mappedIdentity(scope) : {}),
   };
 }
@@ -220,4 +226,33 @@ export async function reverseFleetCashPayment(args: {
   const entryId = Number(result.entryId ?? result.accountingEntryId);
   if (!Number.isSafeInteger(entryId) || entryId <= 0) throw new Error("Central Finance tidak mengembalikan reversal entry ID.");
   return { entryId, idempotent: Boolean(result.idempotent), ...mappedIdentity(scope) };
+}
+
+
+/** Readiness is based on an actual mapped settings response, never configuration alone. */
+export async function getFleetFinanceReadiness(sourceCompanyId = 1) {
+  const cfg = clientConfig();
+  const base = {
+    baseUrlConfigured: Boolean(cfg.baseUrl), tokenConfigured: Boolean(cfg.token),
+    mappingConfigured: Boolean(process.env.FLEET_FINANCE_COMPANY_MAP?.trim()),
+    sourceCompanyId, readReady: false, writeEnabled: cfg.writeEnabled,
+    receiverWriteEnabled: false, receiverWriteReady: false, writeReady: false,
+  };
+  if (!base.baseUrlConfigured || !base.tokenConfigured || !base.mappingConfigured) {
+    return { ...base, reason: "finance_configuration_incomplete" };
+  }
+  try {
+    const scope = financeScope(sourceCompanyId, true);
+    const settings = await getFleetAccountingSettings(sourceCompanyId);
+    const readReady = Boolean(settings.fleetCashAccountId && settings.fleetDriverReceivableAccountId && settings.journalId);
+    const receiverWriteEnabled = "receiverWriteEnabled" in settings && settings.receiverWriteEnabled === true;
+    const receiverWriteReady = "receiverWriteReady" in settings && settings.receiverWriteReady === true;
+    return {
+      ...base, companyId: scope.companyId, readReady, receiverWriteEnabled, receiverWriteReady,
+      writeReady: readReady && cfg.writeEnabled && receiverWriteEnabled && receiverWriteReady,
+      reason: readReady ? null : "finance_settings_incomplete",
+    };
+  } catch {
+    return { ...base, reason: "finance_receiver_unavailable" };
+  }
 }

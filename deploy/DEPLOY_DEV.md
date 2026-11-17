@@ -92,3 +92,32 @@ node scripts/test-fleet-cash-payment-recovery-postgres.mjs
 ```
 
 Harness menolak socket di luar pola fixture privat tersebut. Cakupan meliputi respons hilang sesudah Finance COMMIT, penolakan create duplikat saat pending, retry delapan request dengan satu pengurangan outstanding, cancel yang berlomba dengan penyelesaian create, delapan cancel dengan satu reversal/pengembalian outstanding, penolakan perusahaan sumber salah, ownership driver outstanding, dan seluruh jurnal/ledger tetap perusahaan 3.
+
+
+## Aktivasi kas DEV yang terbatas
+
+Setelah review dan pengujian kandidat, overlay `deploy/docker-compose.dev-cash.yml` dapat dipakai pada **project dan direktori DEV yang sama**. Compose default dan workflow yang dipin tetap mempertahankan staging baca-saja. Jangan mengubah branch guard atau memakai `main`.
+
+Konfigurasi privat tambahan disediakan server melalui alur secret yang berwenang:
+
+- `FLEET_CASH_DATABASE_ENABLED_DEV=true`
+- `FLEET_CASH_DATABASE_URL_DEV`: kredensial khusus `fleet_cash_source_login_dev` pada CST-DEV. Pool hanya dipakai pembayaran/outstanding company 1; reader inventori tidak diganti. Direct TLS memakai public CA Supabase yang dipin; pooler memakai CA sistem dengan verifikasi host. Credential yang berubah memerlukan restart terkontrol.
+- `FLEET_FINANCE_COMPANY_MAP={"1":3}`
+- `CENTRAL_FINANCE_BASE_URL=http://fleet-finance-dev:19888`, receiver canonical yang privat pada network DEV yang sama, tanpa port publik.
+- `CENTRAL_FINANCE_SERVICE_TOKEN`: token khusus yang cocok dengan `FLEET_FINANCE_SERVICE_TOKEN` receiver.
+- `CENTRAL_FINANCE_WRITE_ENABLED=true` hanya pada overlay kas setelah receiver/ACL siap. Receiver tetap memiliki flag dan role database sendiri.
+
+Pool memverifikasi login/role yang tepat, bukan superuser/BYPASSRLS, dan RLS aktif pada pembayaran, outstanding, serta header receipt Finance. API kas hanya menerima sesi Google Super Admin perusahaan sumber 1; mutasi juga harus berasal dari origin Fleet DEV yang benar. Kredensial dan DSN tidak boleh dicetak ke log atau PR.
+
+Overlay membuka halaman kas, GET daftar/ringkasan/settings canonical, POST create/retry, PATCH cancel, serta GET status integrasi. Pengaturan akun pada halaman kas ditampilkan baca-saja dan dikelola di Finance. Aksi WA, scheduler, Gojek, impor/upload, pengubahan settings, dan API lain tetap diblokir. Vehicles/Transactions dan reader lamanya dipertahankan.
+
+Sebelum switch pada checkout branch integrasi yang sudah direview dan image SHA yang sama, jalankan:
+
+```sh
+python3 deploy/dev-only/check-cash-stage-config.py --read-only deploy/.env.dev /etc/fleet-finance-dev/fleet-caller.env
+docker compose --project-name fleet-integration-stage --env-file deploy/.env.dev --env-file /etc/fleet-finance-dev/fleet-caller.env -f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev-cash.yml config --quiet
+```
+
+File `/etc/fleet-finance-dev/fleet-caller.env` harus root-only dan tidak mengganti env reader/Google yang sudah ada. Overlay mengikuti flag writer dari file tersebut; default tetap OFF. Setelah gate role dan receiver siap dan writer secara eksplisit diaktifkan oleh coordinator, ulangi preflight tanpa `--read-only` sebelum switch aktivasi. `config --quiet` tidak mencetak nilai secret. Jalankan deployment hanya setelah test/build pada SHA tersebut lulus; coordinator mempertahankan image/config lama untuk rollback dan melakukan switch pada project DEV yang ada. Tidak ada cutover PROD.
+
+`/api/integrationz` sekarang membaca settings receiver sebenarnya. `readReady` gagal bila scope/respons/konfigurasi salah; `writeReady` memerlukan flag caller, capability receiver, serta privilege sumber yang telah diperiksa. Create DEV juga menolak receiver yang belum siap menulis sebelum menyimpan pembayaran sumber. Keberhasilan readiness tidak menggantikan acceptance pembayaran → retry → reversal lewat sesi Google yang sah.

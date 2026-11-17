@@ -1,4 +1,4 @@
-import { pool } from "./db";
+import { fleetCashPool as pool } from "./fleet-cash-db";
 import {
   assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
@@ -151,6 +151,11 @@ export async function createFleetCashPayment(args: CreateFleetCashPayment) {
   }
   // Resolve destination and settings before creating a recoverable source payment.
   const settings = await getFleetAccountingSettings(args.companyId);
+  if (process.env.APP_ENV === "development" && process.env.FLEET_CASH_DATABASE_ENABLED_DEV === "true" &&
+      (!("receiverWriteEnabled" in settings) || settings.receiverWriteEnabled !== true ||
+       !("receiverWriteReady" in settings) || settings.receiverWriteReady !== true)) {
+    throw new FleetCashPaymentError("Finance Diva belum siap menerima posting pembayaran.");
+  }
   if (!settings.fleetCashAccountId || !settings.fleetDriverReceivableAccountId || !settings.journalId) {
     throw new FleetCashPaymentError("Fleet Accounting Settings di Central Finance belum lengkap.");
   }

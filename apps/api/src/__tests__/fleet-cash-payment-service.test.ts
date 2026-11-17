@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../lib/db", () => ({ pool: { query: vi.fn(), connect: vi.fn() } }));
+vi.mock("../lib/fleet-cash-db", () => ({ fleetCashPool: { query: vi.fn(), connect: vi.fn() } }));
 vi.mock("../lib/central-finance-client", () => ({
   assertCentralFinanceWriteEnabled: vi.fn(),
   getFleetAccountingSettings: vi.fn(),
   postFleetCashPayment: vi.fn(),
   reverseFleetCashPayment: vi.fn(),
 }));
-import { pool } from "../lib/db";
+import { fleetCashPool as pool } from "../lib/fleet-cash-db";
 import { assertCentralFinanceWriteEnabled, getFleetAccountingSettings, postFleetCashPayment, reverseFleetCashPayment } from "../lib/central-finance-client";
 import { createFleetCashPayment, retryFleetCashPayment, cancelFleetCashPayment } from "../lib/fleet-cash-payment-service";
 
@@ -40,6 +40,26 @@ describe("Fleet cash payment recovery and cancellation", () => {
     await expect(createFleetCashPayment(createArgs)).rejects.toThrow("Diva settings unavailable");
     expect(pool.connect).not.toHaveBeenCalled();
     expect(postFleetCashPayment).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inactive receiver writer before recording an activated DEV payment", async () => {
+    const before = { APP_ENV: process.env.APP_ENV, FLEET_CASH_DATABASE_ENABLED_DEV: process.env.FLEET_CASH_DATABASE_ENABLED_DEV };
+    process.env.APP_ENV = "development";
+    process.env.FLEET_CASH_DATABASE_ENABLED_DEV = "true";
+    try {
+      vi.mocked(getFleetAccountingSettings).mockResolvedValue({
+        companyId: 3, sourceCompanyId: 1, fleetCashAccountId: 10,
+        fleetDriverReceivableAccountId: 11, journalId: 12,
+        receiverWriteEnabled: false, receiverWriteReady: false,
+      } as never);
+      await expect(createFleetCashPayment(createArgs)).rejects.toMatchObject({ status: 409 });
+      expect(pool.connect).not.toHaveBeenCalled();
+      expect(postFleetCashPayment).not.toHaveBeenCalled();
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
   });
 
   it.each([0, -1, 1.001, Number.NaN])("rejects invalid amount %s before creating source rows", async (amount) => {

@@ -26,6 +26,9 @@ jobs:
       - name: Install
         run: npm install --ignore-scripts --package-lock=false
 
+      - name: Validate DEV read-only and cash configuration guards
+        run: python3 -m unittest discover -s deploy/dev-only -p 'test*config.py' -v
+
       - name: Typecheck
         run: npm run typecheck
 

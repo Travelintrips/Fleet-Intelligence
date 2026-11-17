@@ -6,6 +6,7 @@ vi.mock("../lib/db", () => ({
 import { pool } from "../lib/db";
 import {
   getFleetAccountingSettings,
+  getFleetFinanceReadiness,
   postFleetCashPayment,
   reverseFleetCashPayment,
   updateFleetAccountingSettings,
@@ -332,4 +333,36 @@ describe("explicit Fleet source to Diva Finance mapping", () => {
       await expect(postFleetCashPayment(sourcePayment)).rejects.toThrow("accounting entry ID");
     },
   );
+});
+
+
+describe("Actual canonical Finance readiness", () => {
+  it("does not report readiness from a disabled or missing configuration", async () => {
+    delete process.env.CENTRAL_FINANCE_BASE_URL;
+    delete process.env.CENTRAL_FINANCE_SERVICE_TOKEN;
+    process.env.CENTRAL_FINANCE_WRITE_ENABLED = "false";
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(getFleetFinanceReadiness()).resolves.toMatchObject({ readReady: false, writeReady: false, writeEnabled: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([
+    { writeEnabled: false, writeReady: false, expected: false },
+    { writeEnabled: true, writeReady: false, expected: false },
+    { writeEnabled: true, writeReady: true, expected: true },
+  ])("requires receiver write proof as well as a successful scoped read", async ({ writeEnabled, writeReady, expected }) => {
+    enableFinance(true);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ companyId: 3, sourceCompanyId: 1, fleetCashAccountId: 11, fleetDriverReceivableAccountId: 12, journalId: 13, writeEnabled, writeReady }), { status: 200 })));
+    await expect(getFleetFinanceReadiness()).resolves.toMatchObject({ readReady: true, writeReady: expected, receiverWriteEnabled: writeEnabled, receiverWriteReady: writeReady });
+  });
+  it("fails closed on receiver scope mismatch", async () => {
+    enableFinance(true);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ companyId: 1, sourceCompanyId: 1, fleetCashAccountId: 11, fleetDriverReceivableAccountId: 12, journalId: 13, writeEnabled: true, writeReady: true }), { status: 200 })));
+    await expect(getFleetFinanceReadiness()).resolves.toMatchObject({ readReady: false, writeReady: false });
+  });
+  it("cannot route an activated DEV cash client to a public or PROD receiver", async () => {
+    enableFinance(true); process.env.APP_ENV = "development"; process.env.FLEET_CASH_DATABASE_ENABLED_DEV = "true";
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(getFleetAccountingSettings(1)).rejects.toThrow("receiver Finance privat");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

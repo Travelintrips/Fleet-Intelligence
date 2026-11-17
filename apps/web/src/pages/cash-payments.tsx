@@ -56,6 +56,8 @@ type SummaryTotals = {
 };
 
 type FleetSettings = {
+  settingsReadOnly?: boolean;
+  companyId?: number;
   fleetCashAccountId: number | null;
   fleetDriverReceivableAccountId: number | null;
 };
@@ -147,7 +149,7 @@ export default function FleetCashPaymentsPage() {
   } = useQuery({
     queryKey: ["fleet-settings"],
     queryFn: async () => {
-      const res = await fetch("/api/logistics/fleet/settings", { credentials: "include" });
+      const res = await fetch("/api/logistics/fleet/cash-payments/settings", { credentials: "include" });
       if (!res.ok) throw new Error("Gagal settings");
       return res.json() as Promise<FleetSettings & { ok: boolean }>;
     },
@@ -157,6 +159,7 @@ export default function FleetCashPaymentsPage() {
     data: coaData,
   } = useQuery({
     queryKey: ["coa-accounts"],
+    enabled: coaOpen && settingsData?.settingsReadOnly === false,
     queryFn: async () => {
       const res = await fetch("/api/accounting/accounts", { credentials: "include" });
       if (!res.ok) throw new Error("Gagal mengambil COA");
@@ -171,7 +174,7 @@ export default function FleetCashPaymentsPage() {
       if (!form.amount || parseFloat(form.amount) <= 0) throw new Error("Jumlah harus > 0");
 
       const coaOk = settingsData?.fleetCashAccountId && settingsData?.fleetDriverReceivableAccountId;
-      if (!coaOk) throw new Error("Fleet Cash Payment COA belum disetup. Atur di bagian Fleet Accounting Settings dulu.");
+      if (!coaOk) throw new Error("Pengaturan Finance Fleet belum tersedia.");
 
       const res = await fetch("/api/logistics/fleet/cash-payments", {
         method: "POST",
@@ -359,12 +362,12 @@ export default function FleetCashPaymentsPage() {
             <div className="flex-1 min-w-0">
               <p className="text-amber-300 font-medium text-sm">Fleet cash payment COA belum disetup.</p>
               <p className="text-amber-400/70 text-xs mt-0.5">
-                Atur <strong>Fleet Cash/Bank Account</strong> dan <strong>Fleet Driver Receivable Account</strong> di bawah sebelum mencatat pembayaran.
+                Pastikan akun kas dan piutang driver telah dikonfigurasi di Finance sebelum mencatat pembayaran.
               </p>
             </div>
-            <Button size="sm" variant="outline" className="border-amber-600 text-amber-300 hover:bg-amber-900/30 flex-shrink-0" onClick={openCoa}>
+            {settings?.settingsReadOnly === false && <Button size="sm" variant="outline" className="border-amber-600 text-amber-300 hover:bg-amber-900/30 flex-shrink-0" onClick={openCoa}>
               <Settings className="w-3.5 h-3.5 mr-1.5" /> Atur COA
-            </Button>
+            </Button>}
           </div>
         )}
 
@@ -538,8 +541,15 @@ export default function FleetCashPaymentsPage() {
           </CardContent>
         </Card>
 
-        {/* COA Settings panel (collapsible) */}
-        <Card className="bg-slate-800/60 border-slate-700">
+        {/* The scoped DEV cash flow uses the existing Finance-owned settings. */}
+        {settings?.settingsReadOnly ? (
+          <Card className="bg-slate-800/60 border-slate-700">
+            <CardContent className="p-4 space-y-1">
+              <p className="text-white font-medium text-sm">Tujuan Finance: {settings.companyId === 3 ? "PT Diva Servis" : "Central Finance"}</p>
+              <p className="text-slate-400 text-sm">Akun kas dan piutang driver dikelola di Finance.</p>
+            </CardContent>
+          </Card>
+        ) : <Card className="bg-slate-800/60 border-slate-700">
           <button
             className="flex items-center justify-between w-full p-4 text-left"
             onClick={() => { if (!coaOpen) openCoa(); else setCoaOpen(false); }}
@@ -613,7 +623,7 @@ export default function FleetCashPaymentsPage() {
               </div>
             </CardContent>
           )}
-        </Card>
+        </Card>}
       </div>
 
       {/* ── Dialog: Create Payment ─────────────────────────────────────── */}
