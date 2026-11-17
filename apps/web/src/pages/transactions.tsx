@@ -15,6 +15,13 @@ function fmtIdr(v: unknown) {
 function fmtNum(v: unknown) {
   return new Intl.NumberFormat("id-ID").format(parseFloat(String(v ?? 0)) || 0);
 }
+function fmtSourceDate(date: string) {
+  // Server returns a calendar date, not a local timestamp.
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString("id-ID", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+  });
+}
 
 export default function FleetTransactionsPage() {
   const [startDate, setStartDate] = useState(() => {
@@ -30,17 +37,24 @@ export default function FleetTransactionsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["fleet-transactions", startDate, endDate, page, pageSize, driverSearchApplied, vehiclePlateApplied],
     queryFn: async () => {
       const params = new URLSearchParams({ startDate, endDate, page: String(page), limit: String(pageSize) });
       if (driverSearchApplied) params.set("driverSearch", driverSearchApplied);
       if (vehiclePlateApplied) params.set("vehiclePlate", vehiclePlateApplied);
       const res = await fetch(`/api/logistics/fleet/transactions?${params}`, { credentials: "include" });
+      // An expired Google session is not an empty transaction report.
+      if (!res.ok) throw new Error(`Fleet Transactions HTTP ${res.status}`);
       return res.json() as Promise<{
         transactions: Array<Record<string, unknown>>;
         summary: Record<string, unknown>;
-        sourceStatus?: { normalizedRows: number; rawRows: number; totalFilteredRows?: number; excludedByEligibility?: number; state: "normalized" | "raw_only" | "no_source_data" };
+        sourceStatus?: {
+          normalizedRows: number; rawRows: number; totalFilteredRows?: number;
+          excludedByEligibility?: number; totalStoredRows?: number;
+          firstAvailableDate?: string | null; lastAvailableDate?: string | null;
+          state: "normalized" | "raw_only" | "no_source_data";
+        };
       }>;
     },
   });
@@ -49,6 +63,8 @@ export default function FleetTransactionsPage() {
   const summary = data?.summary ?? {};
   const sourceStatus = data?.sourceStatus;
   const noSourceData = sourceStatus?.state === "no_source_data";
+  const hasSourceCoverage = Boolean(sourceStatus?.firstAvailableDate && sourceStatus?.lastAvailableDate);
+  const beyondLastStoredDate = hasSourceCoverage && endDate > String(sourceStatus?.lastAvailableDate);
   const excludedRows = Math.max(0, Number(sourceStatus?.excludedByEligibility ?? 0));
   const feeLedgerOnly = Number(summary.total ?? 0) > 0
     && Number(summary.rental_fee_rows ?? 0) === Number(summary.total ?? 0);
@@ -176,6 +192,32 @@ export default function FleetTransactionsPage() {
           </CardContent>
         </Card>
 
+        {isError && (
+          <Card className="bg-slate-800/60 border-slate-700">
+            <CardContent className="p-4 text-sm text-slate-200">
+              Data transaksi belum dapat dibaca. Periksa sesi Google Fleet DEV; ini bukan bukti bahwa tidak ada transaksi.
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Date coverage refers to all company-scoped stored source rows, not
+            only active drivers or the currently selected date/filter range. */}
+        {hasSourceCoverage && !isError && (
+          <Card className="bg-slate-800/60 border-slate-700">
+            <CardContent className="p-4 text-sm text-slate-200">
+              <span className="font-semibold">Periode data tersimpan: </span>
+              {fmtSourceDate(String(sourceStatus?.firstAvailableDate))} – {fmtSourceDate(String(sourceStatus?.lastAvailableDate))}
+              {" · "}{fmtNum(sourceStatus?.totalStoredRows)} transaksi sumber.
+              {beyondLastStoredDate && (
+                <p className="mt-1 text-amber-200">
+                  Belum ada transaksi Fleet DEV yang tersimpan setelah {fmtSourceDate(String(sourceStatus?.lastAvailableDate))}.
+                  Ini tidak berarti tidak ada transaksi lebih baru di sumber Gojek.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {noSourceData && (
           <Card className="border-amber-500/20 bg-amber-500/[0.055]">
             <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
@@ -263,7 +305,7 @@ export default function FleetTransactionsPage() {
                         <tr>
                           <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
                             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                            <p>{noSourceData ? "Belum ada report transaksi yang diproses" : "Tidak ada transaksi di periode ini"}</p>
+                            <p>{isError ? "Gagal memuat transaksi" : noSourceData ? "Belum ada report transaksi yang diproses" : "Tidak ada transaksi di periode ini"}</p>
                             {hasActiveFilters && !noSourceData && <p className="text-xs mt-1">Coba ubah atau hapus filter</p>}
                             {noSourceData && (
                               <Link href="/logistics/fleet-intelligence/upload">
