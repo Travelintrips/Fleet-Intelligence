@@ -285,6 +285,19 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: fleet-dev-stage-images-${{ github.sha }}
+          path: ${{ runner.temp }}/fleet-stage-images
+      - name: Verify validated Fleet image archive from exact CI commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/fleet-stage-images"
+          sha256sum -c fleet-stage-images.tar.gz.sha256
+          gzip -t fleet-stage-images.tar.gz
+          echo "PASS Fleet image artifact integrity; no Docker Hub dependency on VPS"
+
       - name: Transfer validated GCP stage config to isolated VPS path
         shell: bash
         run: |
@@ -294,6 +307,16 @@ jobs:
             "$RUNNER_TEMP/fleet-dev-stage.env" \
             "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/deploy/.env.dev.next"
           echo "PASS dedicated stage file transferred via pinned SSH; not public deployment"
+
+      - name: Transfer exact CI-tested Fleet DEV images to isolated staging directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/fleet-stage-images"
+          scp -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -P "$SSH_PORT" \
+            fleet-stage-images.tar.gz fleet-stage-images.tar.gz.sha256 \
+            "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/deploy/"
+          echo "PASS transferred verified Fleet stage images; public Nginx unchanged"
 
       - name: Deploy DEV over SSH
         shell: bash
@@ -331,8 +354,15 @@ jobs:
           chmod 600 deploy/.env.dev
           python3 deploy/dev-only/check-stage-config.py deploy/.env.dev
 
-          # Isolated 18460 staging only. No Nginx cutover or orphan cleanup.
-          docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --build
+          # Keep stage strictly offline from Docker Hub. Use exactly the CI-tested images.
+          test -s deploy/fleet-stage-images.tar.gz
+          test -s deploy/fleet-stage-images.tar.gz.sha256
+          (cd deploy && sha256sum -c fleet-stage-images.tar.gz.sha256)
+          gzip -dc deploy/fleet-stage-images.tar.gz | docker load
+          docker image inspect fleet-integration-stage-fleet-api:latest fleet-integration-stage-fleet-web:latest >/dev/null
+          rm -f deploy/fleet-stage-images.tar.gz deploy/fleet-stage-images.tar.gz.sha256
+          # Isolated 127.0.0.1:18460 only. No public Nginx cutover, pulls or build.
+          docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --no-build --pull never
 
 
           # The API enforces HTTPS behind a proxy even in Fleet DEV.
