@@ -66,6 +66,29 @@ Konfigurasi kandidat ini memakai `FLEET_FINANCE_COMPANY_MAP={"1":3}` pada Fleet 
 Tes lokal sumber kandidat (tanpa layanan atau database asli):
 
 ```sh
-npm run test -w @workspace/fleet-api -- src/__tests__/central-finance-client.test.ts src/__tests__/prod-hardening.test.ts src/__tests__/integration-readiness.test.ts
-npm run typecheck -w @workspace/fleet-api
+npm run test -w @workspace/fleet-api
+npm run typecheck
 ```
+
+
+### Pemulihan pembayaran yang sudah tercatat
+
+Create melakukan preflight settings canonical sebelum menyimpan sumber. Setelah sumber committed, receiver dapat memverifikasi pembayaran tersebut sebelum membuat jurnal Diva. Status `confirmed` ditampilkan sebagai **Menunggu Posting**; pembayaran ini belum mengurangi outstanding lokal. Jika respons Finance terputus, tombol **Lanjutkan Posting** memanggil `POST /api/logistics/fleet/cash-payments/:id/retry` memakai ID dan data sumber yang sama. Endpoint tidak membuat pembayaran pengganti atau menerima jumlah/perusahaan baru dari body.
+
+- Pembuatan pembayaran ditolak selama driver atau outstanding yang sama masih memiliki pembayaran menunggu posting. Outstanding eksplisit harus milik perusahaan dan driver pembayaran tersebut; bila kedua external ID tersedia, nilainya juga harus sama.
+- Pembatalan pembayaran menunggu posting ditolak sampai link jurnal tersimpan. Tombol batal tersedia untuk pembayaran `posted` yang memiliki link jurnal.
+- Retry dan pembatalan memperoleh ulang row lock setelah respons receiver lalu memeriksa status terbaru. Outstanding dikurangi atau dikembalikan satu kali walaupun beberapa request berjalan bersama. Tidak ada row lock sumber yang ditahan selama HTTP ke receiver.
+- Nilai atau tanggal sumber yang berubah ditolak. Receiver tetap memegang validasi mapping, provenance, idempotensi jurnal, dan reversal entry asli. Writer default OFF dan batas route staging publik tetap berlaku.
+
+Uji pemulihan PostgreSQL memakai helper yang sama dengan route Fleet, client sebenarnya, receiver HTTP canonical sebenarnya, dua role non-superuser, dan fixture PostgreSQL sekali pakai tanpa network Docker. Script ini **tidak** menguji sesi Google atau route publik Fleet, dan bukan bukti Finance aktif di DEV/PROD.
+
+Siapkan fixture baru lewat `scripts/test-fleet-finance-dsv-postgres.mjs` di checkout BizPortal kandidat, kemudian jalankan dari checkout Fleet:
+
+```sh
+FLEET_QA_FINANCE_REPO=/path/to/bizportal-candidate \
+FLEET_QA_DEPENDENCIES=/path/to/bizportal-with-dependencies \
+FLEET_QA_PG_SOCKET=/tmp/fleet-finance-dsv-qa-YYYYMMDD/pgsocket \
+node scripts/test-fleet-cash-payment-recovery-postgres.mjs
+```
+
+Harness menolak socket di luar pola fixture privat tersebut. Cakupan meliputi respons hilang sesudah Finance COMMIT, penolakan create duplikat saat pending, retry delapan request dengan satu pengurangan outstanding, cancel yang berlomba dengan penyelesaian create, delapan cancel dengan satu reversal/pengembalian outstanding, penolakan perusahaan sumber salah, ownership driver outstanding, dan seluruh jurnal/ledger tetap perusahaan 3.

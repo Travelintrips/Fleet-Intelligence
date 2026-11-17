@@ -25,13 +25,16 @@ describe("Fleet production hardening contract", () => {
     expect(route).toContain("auto_blast_hour");
   });
 
-  it("fails before recording a cash payment when Central Finance write is unavailable", () => {
-    expect(route).toContain("assertCentralFinanceWriteEnabled();");
-    expect(route).toContain("const canonicalSettings = await getFleetAccountingSettings(cid);");
-    const guardIndex = route.indexOf("assertCentralFinanceWriteEnabled();");
-    const insertIndex = route.indexOf("INSERT INTO public.fleet_cash_payments");
+  it("delegates cash creation to the guarded recovery service", () => {
+    expect(route).toContain("await createFleetCashPayment({");
+    const service = readFileSync(resolve(process.cwd(), "src/lib/fleet-cash-payment-service.ts"), "utf8");
+    const creation = service.slice(service.indexOf("export async function createFleetCashPayment"));
+    const guardIndex = creation.indexOf("assertCentralFinanceWriteEnabled();");
+    const preflightIndex = creation.indexOf("await getFleetAccountingSettings(args.companyId)");
+    const insertIndex = creation.indexOf("INSERT INTO public.fleet_cash_payments");
     expect(guardIndex).toBeGreaterThan(-1);
-    expect(insertIndex).toBeGreaterThan(guardIndex);
+    expect(preflightIndex).toBeGreaterThan(guardIndex);
+    expect(insertIndex).toBeGreaterThan(preflightIndex);
   });
 
   it("keeps Central Finance journal id when COA-only settings are updated", () => {
