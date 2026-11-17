@@ -16,6 +16,9 @@ services:
       CENTRAL_FINANCE_WRITE_ENABLED: "false"
       GOJEK_CONNECTOR_ENABLED: "false"
       DISABLE_BACKGROUND_SCHEDULERS: "true"
+      # The dedicated Fleet staging reader has a 3-connection hard cap.
+      # Keep the API pool at 2 so a separate audit/health connection remains possible.
+      DB_POOL_MAX: "2"
     restart: unless-stopped
     networks:
       - fleet-dev
