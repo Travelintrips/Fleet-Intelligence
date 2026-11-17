@@ -42,6 +42,9 @@ jobs:
           test -f apps/api/dist/public/deploy-version.json
           node -e 'const v=require("./apps/api/dist/public/deploy-version.json"); if(!v.commit||v.commit==="unknown") process.exit(1)'
 
+      - name: Test Hostinger Fleet Vehicles evidence release gate locally
+        run: node --test scripts/check-fleet-vehicles-production.test.mjs
+
       - name: Docker build API
         run: docker build -t fleet-api-ci apps/api
 
