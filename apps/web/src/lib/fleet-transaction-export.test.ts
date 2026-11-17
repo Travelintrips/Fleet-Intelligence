@@ -123,8 +123,8 @@ describe("Fleet Transactions CSV export: full company-scoped active filter", () 
     };
     const csv = buildFleetTransactionsCsv([record], true);
     expect(csv).toContain('"' + "'=HYPERLINK(" + '""https://invalid.example""');
-    expect(csv).toContain('"\'+SUM(1,2)"');
-    expect(csv).toContain('"\'@CMD"');
+    expect(csv).toContain(`"'+SUM(1,2)"`);
+    expect(csv).toContain(`"'@CMD"`);
     expect(csv).toContain('"-123"'); // signed monetary values stay numeric
     expect(csv.split("\r\n")).toHaveLength(2);
   });
