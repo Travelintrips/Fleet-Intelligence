@@ -51,3 +51,21 @@ Container dan network staging memakai nama otomatis yang dibatasi oleh Compose p
 - Simpan konfigurasi Nginx rollback dan container DEV lama sampai pengujian pengganti selesai.
 
 Jangan jalankan migrasi manual khusus DEV pada database yang sudah berisi transaksi hanya karena workflow atau checkout baru diperbarui. Migrasi `deploy/dev-only/002...` dan `003...` mempunyai prasyarat tabel kosong dan sudah diterapkan sebelum impor nyata.
+
+## Tujuan Finance Fleet: PT Diva Servis (DEV)
+
+Konfigurasi kandidat ini memakai `FLEET_FINANCE_COMPANY_MAP={"1":3}` pada Fleet dan receiver canonical BizPortal DEV. `1` adalah perusahaan **sumber operasional Fleet**; `3` adalah PT Diva Servis sebagai **tujuan pembukuan Finance**. Mapping tidak memindahkan kendaraan, driver, transaksi Gojek, outstanding, pembayaran sumber, atau riwayat perusahaan 1.
+
+- Settings dibaca melalui API canonical perusahaan 3 dengan `sourceCompanyId=1`. Pembayaran dan pembalikan mempertahankan identitas sumber pada body dan kunci idempotensi; respons harus mengonfirmasi kedua ID perusahaan yang sama.
+- Saat mapping aktif, tidak ada fallback SELECT langsung ke database perusahaan sumber maupun tujuan. Konfigurasi URL/token receiver, mapping server, master perusahaan aktif, serta COA/jurnal Diva harus diverifikasi melalui receiver yang benar. Indikator kesehatan integrasi umum tidak membuktikan settings Diva siap.
+- Tanpa mapping, hanya perilaku baca lama yang masih dapat memakai perusahaan sumber. Semua penulisan wajib memiliki mapping eksplisit. Map kosong, salah format, sumber tanpa mapping, dan respons beda perusahaan ditolak.
+- `CENTRAL_FINANCE_WRITE_ENABLED=false` tetap menjadi default, dan Compose staging tetap memaksanya OFF. Patch ini tidak mengaktifkan writer, membuka route publik, mengubah konfigurasi aktif, atau menyebarkan perubahan ke PROD. Receiver memiliki pengaman penulisan sendiri.
+- Pengujian pembayaran/reversal memakai fixture sintetis di lingkungan terisolasi melalui receiver yang sudah ada. Pastikan posting ulang menghasilkan entry yang sama, company 1 tidak memperoleh jurnal target, perusahaan lain ditolak, pembalikan memakai entry asli yang sesuai, dan seluruh fixture dibersihkan/di-rollback.
+- Jalur yang dihubungkan saat ini adalah **pembayaran kas driver dan reversal** yang sudah ada. Impor Gojek tetap menyimpan data sumber Fleet; pengeluaran dan anggaran tetap catatan Fleet; jurnal laporan tetap draft/perlu review dan endpoint posting laporan tetap menolak. Mapping ini tidak menyatakan seluruh jenis transaksi Fleet sudah diposting ke Finance.
+
+Tes lokal sumber kandidat (tanpa layanan atau database asli):
+
+```sh
+npm run test -w @workspace/fleet-api -- src/__tests__/central-finance-client.test.ts src/__tests__/prod-hardening.test.ts src/__tests__/integration-readiness.test.ts
+npm run typecheck -w @workspace/fleet-api
+```
