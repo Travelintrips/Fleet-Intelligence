@@ -10,6 +10,10 @@ const workflow = readFileSync(
   resolve(process.cwd(), "../../.github/workflows/deploy-dev.yml"),
   "utf8",
 );
+const stagingNginx = readFileSync(
+  resolve(process.cwd(), "../../deploy/dev-only/nginx-staging-readonly.conf"),
+  "utf8",
+);
 
 describe("Fleet DEV staging Compose isolation", () => {
   it("uses project-scoped container and network names instead of global names", () => {
@@ -21,6 +25,7 @@ describe("Fleet DEV staging Compose isolation", () => {
 
   it("keeps the second deployment loopback only and disables writes/schedulers", () => {
     expect(compose).toContain('"127.0.0.1:18460:80"');
+    expect(compose).toContain("./dev-only/nginx-staging-readonly.conf:/etc/nginx/conf.d/default.conf:ro");
     expect(compose).toContain('CENTRAL_FINANCE_WRITE_ENABLED: "false"');
     expect(compose).toContain('GOJEK_CONNECTOR_ENABLED: "false"');
     expect(compose).toContain('DISABLE_BACKGROUND_SCHEDULERS: "true"');
@@ -48,10 +53,44 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(workflow).toContain('test "$plain_code" = 308');
     expect(workflow).toContain('test "$auth_code" = 401');
     expect(workflow).toContain('test "$tx_code" = 401');
-    expect(workflow).toContain('test "$gojek_code" = 409');
+    expect(workflow).toContain('test "$gojek_code" = 404');
+    expect(workflow).toContain('test "$direct_gojek_code" = 409');
+    expect(workflow).toContain('test "$upload_code" = 404');
+    expect(workflow).toContain('test "$wa_code" = 404');
+    expect(workflow).toContain('test "$transaction_post_code" = 403');
     expect(workflow).toContain('test "$vehicles_page" = 200');
     expect(workflow).toContain('test "$tx_page" = 200');
     expect(workflow).toContain('test ! -e deploy/.env.dev');
+  });
+
+  it("uses a staged read-only HTTP allowlist, not the shared production Nginx config", () => {
+    for (const path of [
+      "/api/healthz",
+      "/api/auth/google/status",
+      "/api/auth/google/start",
+      "/api/auth/user",
+      "/api/logout",
+      "/api/logistics/fleet/vehicles",
+      "/api/logistics/fleet/transactions",
+      "/api/auth/google-dev-exchange",
+      "/logistics/fleet-intelligence/vehicles",
+      "/logistics/fleet-intelligence/transactions",
+    ]) {
+      expect(stagingNginx).toContain(`location = ${path} {`);
+    }
+    expect(stagingNginx).toContain("location / { return 404; }");
+    expect(stagingNginx).toContain("location ^~ /assets/ {");
+    expect(stagingNginx).not.toMatch(/location\s+\/api\/\s*\{/);
+    for (const blocked of [
+      "/api/logistics/fleet/gojek-connector/handoff",
+      "/api/logistics/fleet/reports/upload",
+      "/api/logistics/fleet/outstanding/wa-blast",
+    ]) {
+      expect(stagingNginx).not.toContain(`location = ${blocked} {`);
+    }
+    expect(stagingNginx).toContain("limit_except POST { deny all; }");
+    expect(stagingNginx).toContain("limit_except GET { deny all; }");
+    expect(stagingNginx).toContain("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;");
   });
 
   it("keeps public Nginx and Fleet PROD outside the staging workflow", () => {
