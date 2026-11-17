@@ -30,6 +30,8 @@ Sebelum staging, workflow menolak koneksi DB yang tidak mengarah ke Supabase **C
 
 Mode `stage-dev` hanya memakai Docker Compose project `fleet-integration-stage` dan port loopback **127.0.0.1:18460**. `CENTRAL_FINANCE_WRITE_ENABLED=false` dan `DISABLE_BACKGROUND_SCHEDULERS=true` dipaksakan oleh `deploy/docker-compose.dev.yml`. Tidak ada `--remove-orphans`.
 
+Container dan network staging memakai nama otomatis yang dibatasi oleh Compose project (tidak memakai `container_name` atau network global `cst-fleet-dev`). Dengan demikian, `stage-dev` tidak dapat mengambil alih container Fleet DEV lain akibat benturan nama. Pengecekan konfigurasi Compose dan tes regresi DEV memverifikasi batasan ini.
+
 **Workflow tidak melakukan cutover Nginx.** Public Fleet DEV tetap menggunakan rute yang sudah diverifikasi, dan tidak ada deploy ke Fleet PROD.
 
 ## Baseline yang wajib dipertahankan
