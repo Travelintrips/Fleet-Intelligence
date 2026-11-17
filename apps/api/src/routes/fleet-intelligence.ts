@@ -2078,6 +2078,9 @@ router.get("/transactions", async (req: AdminRequest, res) => {
         sourceStatus: {
           normalizedRows: 0,
           rawRows: rawCount,
+          totalStoredRows: 0,
+          firstAvailableDate: null,
+          lastAvailableDate: null,
           state: rawCount > 0 ? "raw_only" : "no_source_data",
         },
       });
@@ -2169,6 +2172,22 @@ router.get("/transactions", async (req: AdminRequest, res) => {
           AND ($5='' OR COALESCE(vehicle_plate,'') ILIKE '%' || $5 || '%')`,
       [cid, startDate, endDate, driverSearch, vehiclePlate],
     );
+    // This unfiltered, company-scoped coverage distinguishes a historical
+    // import from the user's currently selected date range. It requires only
+    // the existing SELECT permission on company_id and transaction_date.
+    const sourceCoverage = await pool.query<{
+      total_rows: number;
+      first_available_date: string | null;
+      last_available_date: string | null;
+    }>(
+      `SELECT COUNT(*)::int AS total_rows,
+              MIN(transaction_date)::text AS first_available_date,
+              MAX(transaction_date)::text AS last_available_date
+         FROM public.fleet_transactions
+        WHERE company_id=$1`,
+      [cid],
+    );
+    const totalStoredRows = Number(sourceCoverage.rows[0]?.total_rows ?? 0);
     const normalizedRows = Number(summary.rows[0]?.total ?? 0);
     const totalFilteredRows = Number(sourceCount.rows[0]?.total ?? 0);
     const excludedByEligibility = Math.max(0, totalFilteredRows - normalizedRows);
@@ -2180,7 +2199,12 @@ router.get("/transactions", async (req: AdminRequest, res) => {
         rawRows,
         totalFilteredRows,
         excludedByEligibility,
-        state: normalizedRows > 0 ? "normalized" : totalFilteredRows > 0 ? "normalized" : rawRows > 0 ? "raw_only" : "no_source_data",
+        totalStoredRows,
+        firstAvailableDate: sourceCoverage.rows[0]?.first_available_date ?? null,
+        lastAvailableDate: sourceCoverage.rows[0]?.last_available_date ?? null,
+        // No rows in a selected period does not mean imported historical
+        // transactions are still raw. Keep prior processed data recognizable.
+        state: totalStoredRows > 0 ? "normalized" : rawRows > 0 ? "raw_only" : "no_source_data",
       },
     });
   } catch (error) {
