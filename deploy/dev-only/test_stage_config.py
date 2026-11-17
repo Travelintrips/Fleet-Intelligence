@@ -116,6 +116,17 @@ class StagePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "nonzero"):
             preflight.validate(vals)
 
+    def test_accepts_google_prefixed_canonical_profile_id(self):
+        vals = sample()
+        vals["FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID"] = "google_123456789012345678"
+        preflight.validate(vals)
+
+    def test_rejects_unsafe_canonical_profile_id(self):
+        vals = sample()
+        vals["FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID"] = "google_123; DROP TABLE"
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            preflight.validate(vals)
+
     def test_rejects_weak_session_secret(self):
         vals = sample()
         vals["SESSION_SECRET"] = "short"
