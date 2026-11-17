@@ -93,6 +93,23 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(stagingNginx).toContain("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;");
   });
 
+  it("runs credential-free public DEV OAuth/read-only gates without claiming login PASS", () => {
+    const checkScript = readFileSync(
+      resolve(process.cwd(), "../../deploy/dev-only/check-fleet-dev-public-readonly.py"),
+      "utf8",
+    );
+    expect(workflow).toContain("Public Fleet DEV read-only OAuth and API smoke (no credentials)");
+    expect(workflow).toContain("python3 deploy/dev-only/check-fleet-dev-public-readonly.py");
+    expect(checkScript).toContain("https://dev-fleet.cstlogistic.co.id");
+    expect(checkScript).toContain("xssrfshdrtdfupgqwfdw.supabase.co");
+    expect(checkScript).toContain("NoRedirect(HTTPRedirectHandler)");
+    expect(checkScript).toContain('check_get("/api/auth/user", 401)');
+    expect(checkScript).toContain('check_get("/api/logistics/fleet/vehicles", 401)');
+    expect(checkScript).toContain("Fleet DEV read-only smoke 7 HTTP gates");
+    expect(checkScript).not.toContain('method="POST"');
+    expect(checkScript).not.toContain('"Cookie":');
+  });
+
   it("keeps public Nginx and Fleet PROD outside the staging workflow", () => {
     expect(workflow).toContain('refs/heads/dev/fleet-pr103-pr110-stabilization-20261117');
     expect(workflow).toContain("github.event.inputs.mode == 'stage-dev'");
