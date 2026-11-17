@@ -7,6 +7,7 @@ This is only configuration validation, not a claim of authenticated E2E.
 """
 from __future__ import annotations
 
+import re
 import stat
 import sys
 from pathlib import Path
@@ -65,8 +66,8 @@ def validate(values: dict[str, str]) -> None:
         raise ValueError("valid DEV Google allowed auth UID required") from None
     _require(auth_uid.int != 0, "nonzero DEV Google auth UID required")
     canonical = values.get("FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID", "")
-    _require(canonical.isdecimal() and int(canonical) > 0,
-             "positive DEV Google canonical user ID required")
+    _require(re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", canonical) is not None,
+             "valid DEV Google canonical user ID required")
 
     database_url = values.get("SUPABASE_DATABASE_URL_DEV", "")
     try:
