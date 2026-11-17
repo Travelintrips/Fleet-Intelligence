@@ -1,4 +1,5 @@
 import { DatePicker } from "@/components/ui/date-picker";
+import { initialFleetTransactionDateRange, fleetTransactionQueryParams } from "@/lib/fleet-transaction-date";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
@@ -24,12 +25,10 @@ function fmtSourceDate(date: string) {
 }
 
 export default function FleetTransactionsPage() {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Both defaults come from one browser-local calendar date, not UTC ISO.
+  const [defaultRange] = useState(() => initialFleetTransactionDateRange());
+  const [startDate, setStartDate] = useState(defaultRange.startDate);
+  const [endDate, setEndDate] = useState(defaultRange.endDate);
   const [driverSearch, setDriverSearch] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [driverSearchApplied, setDriverSearchApplied] = useState("");
@@ -40,9 +39,11 @@ export default function FleetTransactionsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["fleet-transactions", startDate, endDate, page, pageSize, driverSearchApplied, vehiclePlateApplied],
     queryFn: async () => {
-      const params = new URLSearchParams({ startDate, endDate, page: String(page), limit: String(pageSize) });
-      if (driverSearchApplied) params.set("driverSearch", driverSearchApplied);
-      if (vehiclePlateApplied) params.set("vehiclePlate", vehiclePlateApplied);
+      const params = fleetTransactionQueryParams({
+        startDate, endDate, page, pageSize,
+        driverSearch: driverSearchApplied,
+        vehiclePlate: vehiclePlateApplied,
+      });
       const res = await fetch(`/api/logistics/fleet/transactions?${params}`, { credentials: "include" });
       // An expired Google session is not an empty transaction report.
       if (!res.ok) throw new Error(`Fleet Transactions HTTP ${res.status}`);
