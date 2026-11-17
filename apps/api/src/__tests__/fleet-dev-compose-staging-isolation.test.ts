@@ -37,6 +37,21 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(workflow).toContain("Staging readiness pending: web=$web_code api=$api_code");
   });
 
+  it("runs a disposable synthetic web/API Compose E2E in validate without stage-dev", () => {
+    expect(workflow).toContain("Synthetic staged Compose HTTP E2E (no real credentials)");
+    expect(workflow).toContain("synthetic_no_db");
+    expect(workflow).toContain("--project-name fleet-integration-stage");
+    expect(workflow).toContain("up -d --build");
+    expect(workflow).toContain("down --volumes");
+    expect(workflow).toContain("rm -f deploy/.env.dev");
+    expect(workflow).toContain('test "$plain_code" = 308');
+    expect(workflow).toContain('test "$auth_code" = 401');
+    expect(workflow).toContain('test "$tx_code" = 401');
+    expect(workflow).toContain('test "$vehicles_page" = 200');
+    expect(workflow).toContain('test "$tx_page" = 200');
+    expect(workflow).toContain('test ! -e deploy/.env.dev');
+  });
+
   it("keeps public Nginx and Fleet PROD outside the staging workflow", () => {
     expect(workflow).toContain('refs/heads/dev/fleet-pr103-pr110-stabilization-20261117');
     expect(workflow).toContain("github.event.inputs.mode == 'stage-dev'");
