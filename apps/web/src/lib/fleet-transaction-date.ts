@@ -15,3 +15,27 @@ export function initialFleetTransactionDateRange(now: Date = new Date()) {
     endDate: toLocalCalendarDate(now),
   };
 }
+
+type FleetTransactionQuery = {
+  startDate: string;
+  endDate: string;
+  page: number;
+  pageSize: number;
+  driverSearch?: string;
+  vehiclePlate?: string;
+};
+
+/** Empty dates must be omitted: PostgreSQL cannot cast '' to DATE. */
+export function fleetTransactionQueryParams({
+  startDate, endDate, page, pageSize, driverSearch, vehiclePlate,
+}: FleetTransactionQuery): URLSearchParams {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(pageSize),
+  });
+  if (startDate) params.set("startDate", startDate);
+  if (endDate) params.set("endDate", endDate);
+  if (driverSearch) params.set("driverSearch", driverSearch);
+  if (vehiclePlate) params.set("vehiclePlate", vehiclePlate);
+  return params;
+}
