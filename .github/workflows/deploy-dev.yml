@@ -188,6 +188,28 @@ jobs:
           python3 deploy/dev-only/check-fleet-dev-public-readonly.py
 
 
+      - name: Export exact CI-built Fleet staging images
+        if: ${{ github.event.inputs.mode == 'stage-dev' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These images already passed the synthetic Compose E2E at this exact SHA.
+          docker image inspect fleet-integration-stage-fleet-api:latest >/dev/null
+          docker image inspect fleet-integration-stage-fleet-web:latest >/dev/null
+          docker save fleet-integration-stage-fleet-api:latest fleet-integration-stage-fleet-web:latest | gzip -1 > "$RUNNER_TEMP/fleet-stage-images.tar.gz"
+          test -s "$RUNNER_TEMP/fleet-stage-images.tar.gz"
+          (cd "$RUNNER_TEMP" && sha256sum fleet-stage-images.tar.gz > fleet-stage-images.tar.gz.sha256)
+          echo "PASS packaged exact CI-tested Fleet DEV images without any credentials"
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event.inputs.mode == 'stage-dev' }}
+        with:
+          name: fleet-dev-stage-images-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/fleet-stage-images.tar.gz
+            ${{ runner.temp }}/fleet-stage-images.tar.gz.sha256
+          retention-days: 1
+          if-no-files-found: error
+
   deploy:
     if: ${{ github.event.inputs.mode == 'stage-dev' }}
     needs: validate
