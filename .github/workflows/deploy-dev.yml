@@ -419,4 +419,6 @@ jobs:
           printf '%s\n' "$FLEET_KEY" > "$key_file"
           chmod 600 "$key_file"
           ssh-keygen -y -f "$key_file" | ssh-keygen -l -E sha256 -f - | awk '{ print "FLEET_DEV_KEY_FINGERPRINT=" $2 }'
-          echo "PASS Fleet DEV private key parsed; no key bytes or credentials printed"
+          # A public key is safe to distribute to the authorized VPS; never print the private key.
+          ssh-keygen -y -f "$key_file" | awk '{ print "FLEET_DEV_SSH_PUBLIC_KEY=" $1 " " $2 }'
+          echo "PASS Fleet DEV private key parsed; only derived public key and fingerprint printed"
