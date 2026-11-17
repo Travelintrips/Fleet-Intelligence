@@ -45,6 +45,21 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(workflow).toContain("Staging readiness pending: web=$web_code api=$api_code");
   });
 
+  it("requires a real CST-only read-only DB check after stage HTTP readiness", () => {
+    const dbSmoke = readFileSync(
+      resolve(process.cwd(), "../../deploy/dev-only/check-fleet-dev-stage-db.cjs"),
+      "utf8",
+    );
+    expect(workflow).toContain("node --check deploy/dev-only/check-fleet-dev-stage-db.cjs");
+    expect(workflow).toContain("node -e \"$(cat deploy/dev-only/check-fleet-dev-stage-db.cjs)\"");
+    expect(dbSmoke).toContain('row.login_role === "fleet_dev_stage_reader"');
+    expect(dbSmoke).toContain('row.readonly === "on"');
+    expect(dbSmoke).toContain("other_company_transactions");
+    expect(dbSmoke).toContain("row.may_insert === false");
+    expect(dbSmoke).toContain("row.may_update === false");
+    expect(dbSmoke).toContain("Number(row.transactions) >= 425");
+  });
+
   it("runs a disposable synthetic web/API Compose E2E in validate without stage-dev", () => {
     expect(workflow).toContain("Synthetic staged Compose HTTP E2E (no real credentials)");
     expect(workflow).toContain("synthetic_no_db");
