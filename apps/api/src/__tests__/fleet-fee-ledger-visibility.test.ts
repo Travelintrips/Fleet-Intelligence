@@ -35,6 +35,20 @@ describe("Fleet DEV rental fee source integrity and eligibility visibility", () 
     expect(route).toContain("SUM(net_revenue)");
   });
 
+  it("shows company-scoped source date coverage without claiming a fresh Gojek feed", () => {
+    expect(route).toContain("MIN(transaction_date)::text AS first_available_date");
+    expect(route).toContain("MAX(transaction_date)::text AS last_available_date");
+    expect(route).toContain("const totalStoredRows =");
+    expect(route).toContain("firstAvailableDate:");
+    expect(route).toContain("lastAvailableDate:");
+    expect(route).toContain('state: totalStoredRows > 0 ? "normalized"');
+    expect(page).toContain("Periode data tersimpan:");
+    expect(page).toContain("lastAvailableDate");
+    expect(page).toContain("bukan bukti bahwa tidak ada transaksi");
+    expect(page).toContain("Ini tidak berarti tidak ada transaksi lebih baru di sumber Gojek");
+    expect(page).toContain("if (!res.ok) throw new Error");
+  });
+
   it("surfaces excluded rows and explicitly relabels fee-only totals and CSV headers", () => {
     expect(page).toContain("excludedByEligibility ?? 0");
     expect(page).toContain("tidak tampil sebagai transaksi driver aktif");
