@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Car, Plus, ArrowLeft, FileText } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import { fleetVehicleEvidenceView } from "@/lib/fleet-vehicle-evidence";
 
 function fmtDate(s: unknown) {
   if (!s) return "—";
@@ -24,10 +25,11 @@ export default function FleetVehiclesPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ plate: "", vehicleType: "motor", brand: "", model: "", year: "", color: "", notes: "" });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["fleet-vehicles"],
     queryFn: async () => {
       const res = await fetch("/api/logistics/fleet/vehicles", { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal membaca kendaraan Fleet (HTTP " + res.status + ")");
       return res.json() as Promise<{ vehicles: Vehicle[] }>;
     },
   });
@@ -56,6 +58,10 @@ export default function FleetVehiclesPage() {
   const aktif    = vehicles.filter((v) => v.status === "active").length;
   const motor    = vehicles.filter((v) => String(v.vehicle_type ?? "motor") === "motor").length;
   const mobil    = vehicles.filter((v) => String(v.vehicle_type ?? "") === "car").length;
+  const driverAktif = vehicles.length === 0 ? 0 : vehicles.every((v) => typeof v.driver_status === "string")
+    ? vehicles.filter((v) => v.driver_status === "active").length : "—";
+  const reviewNeeded = vehicles.length === 0 ? 0 : vehicles.every((v) => fleetVehicleEvidenceView(v).tone !== "unknown")
+    ? vehicles.filter((v) => fleetVehicleEvidenceView(v).tone === "warning").length : "—";
 
   return (
     <AppShell>
@@ -80,10 +86,12 @@ export default function FleetVehiclesPage() {
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           {[
             { label: "Total Kendaraan", value: total },
-            { label: "Aktif", value: aktif },
+            { label: "Aktif Kendaraan", value: aktif },
+            { label: "Driver Aktif", value: driverAktif },
+            { label: "Perlu Review", value: reviewNeeded },
             { label: "Motor", value: motor },
             { label: "Mobil", value: mobil },
           ].map((s) => (
@@ -99,6 +107,14 @@ export default function FleetVehiclesPage() {
           ))}
         </div>
 
+        <p className="text-xs text-amber-300">
+          Status aktif adalah status kendaraan, bukan status driver dan bukan izin dispatch.
+          Kolom transaksi menunjukkan jumlah catatan transaksi serta tanggal transaksi terakhir.
+          Bukti data cocok bukan persetujuan operasional atau izin dispatch.
+        </p>
+
+        {isError && <p role="alert" className="text-sm text-rose-300">Gagal memuat data kendaraan Fleet. Coba muat ulang; status belum dapat diverifikasi.</p>}
+
         {/* Table */}
         <Card className="bg-slate-800/60 border-slate-700">
           <CardContent className="p-0">
@@ -106,7 +122,7 @@ export default function FleetVehiclesPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-700">
                   <tr>
-                    {["Plat", "Tipe", "Merk/Model", "Driver Terakhir", "Terakhir Aktif", "Transaksi", "Sumber", "Status"].map((h) => (
+                    {["Plat", "Tipe", "Merk/Model", "Driver Terpasang", "Transaksi Terakhir", "Transaksi", "Sumber", "Status Kendaraan", "Bukti Data"].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -115,14 +131,16 @@ export default function FleetVehiclesPage() {
                   {isLoading
                     ? Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="border-b border-slate-700/50">
-                          <td colSpan={8} className="px-4 py-3">
+                          <td colSpan={9} className="px-4 py-3">
                             <div className="h-4 bg-slate-700 rounded animate-pulse" />
                           </td>
                         </tr>
                       ))
-                    : vehicles.length === 0 ? (
+                    : isError ? (
+                        <tr className="border-b border-slate-700/50"><td colSpan={9} className="px-4 py-10 text-center text-rose-300">Data kendaraan belum dapat dibaca; tidak menyimpulkan armada kosong.</td></tr>
+                      ) : vehicles.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-16 text-center text-slate-500">
+                          <td colSpan={9} className="px-4 py-16 text-center text-slate-500">
                             <Car className="w-10 h-10 mx-auto mb-3 opacity-40" />
                             <p>Belum ada data kendaraan</p>
                             <p className="text-xs mt-1">Upload laporan CSV Gojek untuk mengisi data otomatis</p>
@@ -135,6 +153,7 @@ export default function FleetVehiclesPage() {
                         const brand = String(v.brand ?? "");
                         const model = String(v.model ?? "");
                         const brandModel = [brand, model].filter(Boolean).join(" / ") || "—";
+                        const evidence = fleetVehicleEvidenceView(v);
                         return (
                           <tr key={String(v.plate ?? idx)} className="border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors">
                             <td className="px-4 py-3 font-mono font-bold text-white whitespace-nowrap">
@@ -146,9 +165,10 @@ export default function FleetVehiclesPage() {
                             <td className="px-4 py-3 text-slate-300">{brandModel}</td>
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap max-w-[140px] truncate">
                               {String(v.driver_name ?? "—")}
+                              <div className="text-xs mt-1 text-slate-500">{String(v.driver_status ?? "unknown") === "active" ? "Driver aktif" : String(v.driver_status ?? "unknown") === "suspended" ? "Driver suspended" : String(v.driver_status ?? "unknown") === "inactive" ? "Driver tidak aktif" : "Status driver belum terverifikasi"}</div>
                             </td>
                             <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-xs">
-                              {fmtDate(v.last_seen_date)}
+                              {fmtDate(v.last_transaction_date)}
                             </td>
                             <td className="px-4 py-3 text-slate-400 text-right tabular-nums">
                               {v.tx_count != null ? Number(v.tx_count).toLocaleString("id-ID") : "—"}
@@ -172,6 +192,20 @@ export default function FleetVehiclesPage() {
                               }>
                                 {v.status === "active" ? "Aktif" : String(v.status ?? "aktif")}
                               </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-xs min-w-[190px]">
+                              <Badge className={
+                                evidence.tone === "ok"
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-700/50 text-xs"
+                                  : evidence.tone === "warning"
+                                    ? "bg-amber-500/15 text-amber-300 border border-amber-700/50 text-xs"
+                                    : "bg-slate-500/15 text-slate-300 border border-slate-600 text-xs"
+                              }>{evidence.label}</Badge>
+                              {evidence.reasons.length > 0 && (
+                                <div className="mt-1 text-slate-400 whitespace-normal" title={evidence.reasons.join("; ")}>
+                                  {evidence.reasons.join(" · ")}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );

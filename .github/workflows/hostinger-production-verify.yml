@@ -88,6 +88,10 @@ jobs:
           console.log("fleet_production_readiness=PASS dependencies="+ready.dependencies);
           NODE
 
+      - name: Verify Fleet Vehicles Issue 101 evidence is actually deployed
+        shell: bash
+        run: node scripts/check-fleet-vehicles-production.mjs
+
       - name: Validate production integrations
         shell: bash
         run: |

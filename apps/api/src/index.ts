@@ -1,4 +1,5 @@
 import app from "./app";
+import type { PoolClient } from "pg";
 import { logger } from "./lib/logger";
 import { pool } from "./lib/db";
 import { runFleetAutoReminderSweep, runFleetOneTimeResend } from "./lib/fleet-wa-reminder";
@@ -57,7 +58,9 @@ const tick = async () => {
 let maintenanceTimer: NodeJS.Timeout | null = null;
 let resendTimer: NodeJS.Timeout | null = null;
 let reportTimer: NodeJS.Timeout | null = null;
-let backgroundLeaderClient: Awaited<ReturnType<typeof pool.connect>> | null = null;
+// Pool.connect has callback overloads; ReturnType selects void for those overloads.
+// Pin this leader connection to PoolClient without changing its runtime behavior.
+let backgroundLeaderClient: PoolClient | null = null;
 let acquiringBackgroundLeadership = false;
 
 const stopBackgroundJobs = () => {
