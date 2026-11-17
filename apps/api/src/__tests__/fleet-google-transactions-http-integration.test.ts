@@ -88,7 +88,7 @@ describe("Fleet DEV Google Super Admin to Transactions HTTP integration (MOCKED 
         })) } as never;
       }
       if (sql.includes("SELECT id,transaction_date,driver_name,vehicle_plate,service_type,")) {
-        return { rows: Array.from({ length: 5 }, (_, idx) => ({
+        return { rows: params[1] === "2026-11-05" ? [] : Array.from({ length: 5 }, (_, idx) => ({
           id: idx + 1, company_id: 1, transaction_date: "2026-11-04",
           driver_name: "FICTITIOUS_DRIVER", vehicle_plate: "SYNTH" + idx,
           service_type: null, trip_count: 0, amount: 1000,
@@ -97,16 +97,22 @@ describe("Fleet DEV Google Super Admin to Transactions HTTP integration (MOCKED 
         })) } as never;
       }
       if (sql.includes("AS rental_fee_rows")) return { rows: [{
-        total: 413, total_trips: 0, total_net: "409667.0000",
-        total_gross: "4560000.0000", rental_fee_rows: 413,
+        total: params[1] === "2026-11-05" ? 0 : 413,
+        total_trips: 0, total_net: "409667.0000",
+        total_gross: "4560000.0000", rental_fee_rows: params[1] === "2026-11-05" ? 0 : 413,
         rental_fee_signed_net: "409667.0000",
         rental_fee_due_total: "4560000.0000",
         rental_fee_deduction_total: "-4150333.0000",
       }] } as never;
       if (sql.includes("public.gojek_raw_transactions") && sql.includes("COUNT(*)"))
         return { rows: [{ count: 425 }] } as never;
+      if (sql.includes("MIN(transaction_date)::text AS first_available_date"))
+        return { rows: [{
+          total_rows: 425, first_available_date: "2026-11-01",
+          last_available_date: "2026-11-04",
+        }] } as never;
       if (sql.includes("SELECT COUNT(*)::int AS total") && sql.includes("public.fleet_transactions"))
-        return { rows: [{ total: 425 }] } as never;
+        return { rows: [{ total: params[1] === "2026-11-05" ? 0 : 425 }] } as never;
       throw new Error("Unexpected SQL query in mocked HTTP test");
     });
 
@@ -172,13 +178,34 @@ describe("Fleet DEV Google Super Admin to Transactions HTTP integration (MOCKED 
       expect(response.sourceStatus).toMatchObject({
         normalizedRows: 413, rawRows: 425,
         totalFilteredRows: 425, excludedByEligibility: 12,
-        state: "normalized",
+        totalStoredRows: 425, firstAvailableDate: "2026-11-01",
+        lastAvailableDate: "2026-11-04", state: "normalized",
       });
       for (const item of response.transactions) {
         expect(item).not.toHaveProperty("driver_phone");
         expect(item).not.toHaveProperty("gopay_reference_id");
         expect(item).not.toHaveProperty("raw_data");
       }
+      // A future date filter is empty, but the full-company source was
+      // already normalized. Never mislabel that state "raw_only".
+      const future = await get(
+        "/api/logistics/fleet/transactions?startDate=2026-11-05&endDate=2026-11-17&limit=5",
+        cookie,
+      );
+      expect(future.status).toBe(200);
+      const futureData = await future.json() as {
+        transactions: Array<Record<string, unknown>>;
+        sourceStatus: Record<string, unknown>;
+        summary: Record<string, unknown>;
+      };
+      expect(futureData.transactions).toHaveLength(0);
+      expect(futureData.summary.total).toBe(0);
+      expect(futureData.sourceStatus).toMatchObject({
+        totalFilteredRows: 0, excludedByEligibility: 0,
+        totalStoredRows: 425, firstAvailableDate: "2026-11-01",
+        lastAvailableDate: "2026-11-04", state: "normalized",
+      });
+
       expect(query).toHaveBeenCalled();
       for (const call of query.mock.calls) {
         const sql = String(call[0]);
