@@ -1,30 +1,43 @@
-# Fleet DEV deployment
+# Fleet Intelligence — deployment DEV terisolasi
 
-The DEV deployment is intentionally separate from production.
+Branch integrasi Fleet DEV yang telah lulus E2E:
 
-## Required GitHub environment
+`dev/fleet-pr103-pr110-stabilization-20261117`
 
-Create an Actions environment named `fleet-dev`.
+**Jangan gunakan `main` untuk deployment Fleet DEV.** Branch `main` adalah sumber Hostinger Fleet PROD dan sengaja tidak diubah dalam integrasi PR #103–#110.
 
-Required secrets:
+## Menjalankan workflow GitHub
 
-- `HOSTINGER_SSH_HOST`
-- `HOSTINGER_SSH_PORT`
-- `HOSTINGER_SSH_USER`
-- `HOSTINGER_SSH_PRIVATE_KEY`
-- `HOSTINGER_SSH_KNOWN_HOSTS`
-- `FLEET_DEV_DEPLOY_PATH` (recommended: `/opt/fleet-intelligence-dev`)
+Buka **Actions → Deploy Fleet DEV — pinned integration branch → Run workflow**:
 
-The workflow never writes application secrets to the server. The server must already contain:
+1. Pilih branch `dev/fleet-pr103-pr110-stabilization-20261117`, **bukan** `main`.
+2. Pilih `validate-only` (default) untuk checkout commit persis yang dipilih, typecheck, test, build, dan pemeriksaan Docker. Tidak ada SSH, deploy, atau perubahan server.
+3. `stage-dev` hanya jika benar-benar ingin membuat/memperbarui **kandidat terpisah** di VPS; butuh konfigurasi staging yang disiapkan khusus.
 
-`<FLEET_DEV_DEPLOY_PATH>/deploy/.env.dev`
+Workflow versi branch DEV **menolak** eksekusi bila `github.ref` tidak cocok dengan branch integrasi tersebut, dan mencocokkan commit `github.sha` sampai ke checkout di VPS. File workflow pada branch `main` masih versi lama; jangan memilih `main` saat menjalankan workflow. Hanya workflow DEV branch ini yang memiliki pengaman tersebut.
 
-That file must contain DEV-only database, authentication, WA Gateway and Central Finance configuration.
+## Lingkungan GitHub dan staging VPS
 
-## Safety
+Environment GitHub Actions: `fleet-dev`. Secret yang diperlukan untuk mode `stage-dev`:
 
-- Deployment only runs manually through `workflow_dispatch`.
-- CI/typecheck/build/Docker builds must pass before SSH deployment starts.
-- The deployment resets only the dedicated Fleet DEV checkout.
-- Central Finance writes remain disabled by `deploy/docker-compose.dev.yml`.
-- Health checks validate both the web container and Fleet API before success is reported.
+- `HOSTINGER_SSH_HOST`, `HOSTINGER_SSH_PORT`, `HOSTINGER_SSH_USER`
+- `HOSTINGER_SSH_PRIVATE_KEY`, `HOSTINGER_SSH_KNOWN_HOSTS`
+- `FLEET_DEV_DEPLOY_PATH` **harus** `/opt/fleet-intelligence-dev`
+
+Checkout staging harus sudah tersedia di direktori tersebut, berasal dari repository `Travelintrips/Fleet-Intelligence`, serta mempunyai file privat `deploy/.env.dev`. Workflow **tidak** mengambil atau menyalin kredensial dari PROD maupun container canary yang sudah PASS.
+
+Sebelum staging, workflow menolak koneksi DB yang tidak mengarah ke Supabase **CST-DEV** (`xssrfshdrtdfupgqwfdw`) atau tidak menggunakan PostgreSQL role baca-saja `fleet_dev_cst_inventory_reader`.
+
+Mode `stage-dev` hanya memakai Docker Compose project `fleet-integration-stage` dan port loopback **127.0.0.1:18460**. `CENTRAL_FINANCE_WRITE_ENABLED=false` dan `DISABLE_BACKGROUND_SCHEDULERS=true` dipaksakan oleh `deploy/docker-compose.dev.yml`. Tidak ada `--remove-orphans`.
+
+**Workflow tidak melakukan cutover Nginx.** Public Fleet DEV tetap menggunakan rute yang sudah diverifikasi, dan tidak ada deploy ke Fleet PROD.
+
+## Baseline yang wajib dipertahankan
+
+- Fleet DEV Google Super Admin, kendaraan, dan Transactions: E2E GET **PASS**.
+- Sumber resmi: 428 baris CSV, 425 unik tersimpan, 3 duplikat, tanpa impor ulang.
+- Transaksi 413 driver aktif, 12 historis tetap tersimpan; biaya sewa tidak disebut pendapatan perjalanan.
+- Tidak menulis jurnal, mengirim WhatsApp, mengubah scheduler, atau mengaktifkan worker Gojek PROD.
+- Simpan konfigurasi Nginx rollback dan container DEV lama sampai pengujian pengganti selesai.
+
+Jangan jalankan migrasi manual khusus DEV pada database yang sudah berisi transaksi hanya karena workflow atau checkout baru diperbarui. Migrasi `deploy/dev-only/002...` dan `003...` mempunyai prasyarat tabel kosong dan sudah diterapkan sebelum impor nyata.
