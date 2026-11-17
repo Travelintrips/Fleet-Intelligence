@@ -28,6 +28,15 @@ describe("Fleet DEV staging Compose isolation", () => {
     expect(workflow).toContain('test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"');
   });
 
+  it("requires a real HTTP 200 for staged web and API readiness, never a 308 redirect", () => {
+    expect(workflow).toContain("web_code=$(curl");
+    expect(workflow).toContain("api_code=$(curl");
+    expect(workflow).toContain("--header 'X-Forwarded-Proto: https'");
+    expect(workflow).toContain('if [ "$web_code" = "200" ] && [ "$api_code" = "200" ]; then');
+    expect(workflow).not.toContain("if curl --fail --silent http://127.0.0.1:18460/healthz");
+    expect(workflow).toContain("Staging readiness pending: web=$web_code api=$api_code");
+  });
+
   it("keeps public Nginx and Fleet PROD outside the staging workflow", () => {
     expect(workflow).toContain('refs/heads/dev/fleet-pr103-pr110-stabilization-20261117');
     expect(workflow).toContain("github.event.inputs.mode == 'stage-dev'");
