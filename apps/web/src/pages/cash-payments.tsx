@@ -56,6 +56,8 @@ type SummaryTotals = {
 };
 
 type FleetSettings = {
+  settingsReadOnly?: boolean;
+  companyId?: number;
   fleetCashAccountId: number | null;
   fleetDriverReceivableAccountId: number | null;
 };
@@ -68,7 +70,7 @@ type CoaAccount = {
 };
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
-  confirmed: { label: "Dikonfirmasi", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-600" },
+  confirmed: { label: "Menunggu Posting", cls: "bg-amber-500/20 text-amber-300 border-amber-600" },
   cancelled: { label: "Dibatalkan",   cls: "bg-red-500/20 text-red-300 border-red-600" },
   posted:    { label: "Diposting",    cls: "bg-blue-500/20 text-blue-300 border-blue-600" },
 };
@@ -147,7 +149,7 @@ export default function FleetCashPaymentsPage() {
   } = useQuery({
     queryKey: ["fleet-settings"],
     queryFn: async () => {
-      const res = await fetch("/api/logistics/fleet/settings", { credentials: "include" });
+      const res = await fetch("/api/logistics/fleet/cash-payments/settings", { credentials: "include" });
       if (!res.ok) throw new Error("Gagal settings");
       return res.json() as Promise<FleetSettings & { ok: boolean }>;
     },
@@ -157,6 +159,7 @@ export default function FleetCashPaymentsPage() {
     data: coaData,
   } = useQuery({
     queryKey: ["coa-accounts"],
+    enabled: coaOpen && settingsData?.settingsReadOnly === false,
     queryFn: async () => {
       const res = await fetch("/api/accounting/accounts", { credentials: "include" });
       if (!res.ok) throw new Error("Gagal mengambil COA");
@@ -171,7 +174,7 @@ export default function FleetCashPaymentsPage() {
       if (!form.amount || parseFloat(form.amount) <= 0) throw new Error("Jumlah harus > 0");
 
       const coaOk = settingsData?.fleetCashAccountId && settingsData?.fleetDriverReceivableAccountId;
-      if (!coaOk) throw new Error("Fleet Cash Payment COA belum disetup. Atur di bagian Fleet Accounting Settings dulu.");
+      if (!coaOk) throw new Error("Pengaturan Finance Fleet belum tersedia.");
 
       const res = await fetch("/api/logistics/fleet/cash-payments", {
         method: "POST",
@@ -189,6 +192,13 @@ export default function FleetCashPaymentsPage() {
       });
       const json = await res.json().catch(() => ({})) as Record<string, unknown>;
       if (!res.ok) {
+        if (json.paymentRecorded === true && Number(json.paymentId) > 0) {
+          setFormOpen(false);
+          setForm(EMPTY_FORM);
+          qc.invalidateQueries({ queryKey: ["fleet-cash-payments"] });
+          qc.invalidateQueries({ queryKey: ["fleet-cash-payments-summary"] });
+          throw new Error("Pembayaran #" + json.paymentId + " sudah tercatat. Pilih Lanjutkan Posting pada daftar pembayaran.");
+        }
         if (res.status === 400) throw new Error(String(json.error ?? "Data tidak valid"));
         if (res.status === 422) throw new Error("Periode akuntansi sudah dikunci. Hubungi admin.");
         throw new Error(String(json.error ?? "Gagal menyimpan pembayaran"));
@@ -203,6 +213,27 @@ export default function FleetCashPaymentsPage() {
       qc.invalidateQueries({ queryKey: ["fleet-cash-payments-summary"] });
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch("/api/logistics/fleet/cash-payments/" + id + "/retry", {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({})) as Record<string, unknown>;
+      if (!res.ok) throw new Error(String(json.error ?? "Posting pembayaran belum selesai"));
+      return json;
+    },
+    onSuccess: () => {
+      toast.success("Posting pembayaran selesai");
+      qc.invalidateQueries({ queryKey: ["fleet-cash-payments"] });
+      qc.invalidateQueries({ queryKey: ["fleet-cash-payments-summary"] });
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+      qc.invalidateQueries({ queryKey: ["fleet-cash-payments"] });
+    },
   });
 
   const cancelMutation = useMutation({
@@ -331,12 +362,12 @@ export default function FleetCashPaymentsPage() {
             <div className="flex-1 min-w-0">
               <p className="text-amber-300 font-medium text-sm">Fleet cash payment COA belum disetup.</p>
               <p className="text-amber-400/70 text-xs mt-0.5">
-                Atur <strong>Fleet Cash/Bank Account</strong> dan <strong>Fleet Driver Receivable Account</strong> di bawah sebelum mencatat pembayaran.
+                Pastikan akun kas dan piutang driver telah dikonfigurasi di Finance sebelum mencatat pembayaran.
               </p>
             </div>
-            <Button size="sm" variant="outline" className="border-amber-600 text-amber-300 hover:bg-amber-900/30 flex-shrink-0" onClick={openCoa}>
+            {settings?.settingsReadOnly === false && <Button size="sm" variant="outline" className="border-amber-600 text-amber-300 hover:bg-amber-900/30 flex-shrink-0" onClick={openCoa}>
               <Settings className="w-3.5 h-3.5 mr-1.5" /> Atur COA
-            </Button>
+            </Button>}
           </div>
         )}
 
@@ -365,7 +396,7 @@ export default function FleetCashPaymentsPage() {
               bg: "bg-blue-900/20 border-blue-700/30",
             },
             {
-              label: "Total Dikonfirmasi",
+              label: "Menunggu Posting",
               value: String(totals?.confirmedCount ?? 0) + " transaksi",
               icon: <CheckCircle className="w-7 h-7 text-slate-400" />,
               cls: "text-slate-300",
@@ -393,7 +424,8 @@ export default function FleetCashPaymentsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Semua Status</SelectItem>
-              <SelectItem value="confirmed">Dikonfirmasi</SelectItem>
+              <SelectItem value="confirmed">Menunggu Posting</SelectItem>
+              <SelectItem value="posted">Diposting</SelectItem>
               <SelectItem value="cancelled">Dibatalkan</SelectItem>
             </SelectContent>
           </Select>
@@ -477,11 +509,23 @@ export default function FleetCashPaymentsPage() {
                                   : <span className="text-slate-600">-</span>}
                               </td>
                               <td className="px-4 py-3">
-                                {!cancelled && (
+                                {p.status === "confirmed" && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs border-amber-700 text-amber-300 gap-1"
+                                    disabled={retryMutation.isPending}
+                                    onClick={() => retryMutation.mutate(p.id)}
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Lanjutkan Posting
+                                  </Button>
+                                )}
+                                {p.status === "posted" && p.accounting_entry_id && (
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     className="h-7 text-xs border-red-700 text-red-400 hover:bg-red-900/30 gap-1"
+                                    disabled={cancelMutation.isPending}
                                     onClick={() => setCancelId(p.id)}
                                   >
                                     <XCircle className="w-3 h-3" /> Batal
@@ -497,8 +541,15 @@ export default function FleetCashPaymentsPage() {
           </CardContent>
         </Card>
 
-        {/* COA Settings panel (collapsible) */}
-        <Card className="bg-slate-800/60 border-slate-700">
+        {/* The scoped DEV cash flow uses the existing Finance-owned settings. */}
+        {settings?.settingsReadOnly ? (
+          <Card className="bg-slate-800/60 border-slate-700">
+            <CardContent className="p-4 space-y-1">
+              <p className="text-white font-medium text-sm">Tujuan Finance: {settings.companyId === 3 ? "PT Diva Servis" : "Central Finance"}</p>
+              <p className="text-slate-400 text-sm">Akun kas dan piutang driver dikelola di Finance.</p>
+            </CardContent>
+          </Card>
+        ) : <Card className="bg-slate-800/60 border-slate-700">
           <button
             className="flex items-center justify-between w-full p-4 text-left"
             onClick={() => { if (!coaOpen) openCoa(); else setCoaOpen(false); }}
@@ -572,7 +623,7 @@ export default function FleetCashPaymentsPage() {
               </div>
             </CardContent>
           )}
-        </Card>
+        </Card>}
       </div>
 
       {/* ── Dialog: Create Payment ─────────────────────────────────────── */}

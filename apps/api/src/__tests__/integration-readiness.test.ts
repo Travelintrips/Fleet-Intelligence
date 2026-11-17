@@ -3,16 +3,18 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const routes = readFileSync(resolve(process.cwd(), "src/routes/index.ts"), "utf8");
+const finance = readFileSync(resolve(process.cwd(), "src/lib/central-finance-client.ts"), "utf8");
 
 describe("Fleet integration readiness", () => {
   it("exposes only sanitized WA and Central Finance readiness", () => {
     expect(routes).toContain('router.get("/integrationz"');
     expect(routes).toContain("deviceOnline");
     expect(routes).toContain("assignedDeviceCount");
-    expect(routes).toContain("tokenConfigured");
-    expect(routes).toContain("writeEnabled");
-    expect(routes).toContain("readReady");
-    expect(routes).toContain("writeReady");
+    expect(finance).toContain("tokenConfigured");
+    expect(finance).toContain("writeEnabled");
+    expect(finance).toContain("readReady");
+    expect(routes).toContain("writeReady: finance.writeReady && cashSource.writeReady");
+    expect(routes).not.toContain("readReady: true");
     expect(routes).toContain("deviceSelection");
     expect(routes).not.toContain("CENTRAL_FINANCE_SERVICE_TOKEN: process.env");
     expect(routes).not.toContain("CST_WA_GATEWAY_TOKEN: process.env");

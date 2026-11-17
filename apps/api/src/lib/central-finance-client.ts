@@ -2,6 +2,56 @@ import { pool } from "./db";
 
 type Json = Record<string, unknown>;
 
+type FleetFinanceScope = {
+  sourceCompanyId: number;
+  companyId: number;
+  mapped: boolean;
+};
+
+// Fleet ownership remains unchanged. Only the Finance request destination is mapped.
+function financeScope(sourceCompanyId: number, requireMapping = false): FleetFinanceScope {
+  if (!Number.isSafeInteger(sourceCompanyId) || sourceCompanyId <= 0) {
+    throw new Error("Perusahaan sumber Fleet tidak valid.");
+  }
+  const raw = String(process.env.FLEET_FINANCE_COMPANY_MAP ?? "").trim();
+  if (!raw) {
+    if (requireMapping) throw new Error("Mapping perusahaan Fleet Finance belum dikonfigurasi.");
+    return { sourceCompanyId, companyId: sourceCompanyId, mapped: false };
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch {
+    throw new Error("Mapping perusahaan Fleet Finance tidak valid.");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("Mapping perusahaan Fleet Finance tidak valid.");
+  }
+  const entries = Object.entries(parsed);
+  if (!entries.length) throw new Error("Mapping perusahaan Fleet Finance tidak valid.");
+  const destinations = new Map<number, number>();
+  for (const [source, destination] of entries) {
+    const sourceId = Number(source);
+    if (!/^[1-9][0-9]*$/.test(source) || !Number.isSafeInteger(sourceId) ||
+        typeof destination !== "number" || !Number.isSafeInteger(destination) || destination <= 0) {
+      throw new Error("Mapping perusahaan Fleet Finance tidak valid.");
+    }
+    destinations.set(sourceId, destination);
+  }
+  const companyId = destinations.get(sourceCompanyId);
+  if (!companyId) throw new Error("Perusahaan sumber Fleet tidak memiliki mapping Finance.");
+  return { sourceCompanyId, companyId, mapped: true };
+}
+
+function assertFinanceResponseScope(result: Json, scope: FleetFinanceScope) {
+  if (scope.mapped &&
+      (result.companyId !== scope.companyId || result.sourceCompanyId !== scope.sourceCompanyId)) {
+    throw new Error("Respons Central Finance tidak sesuai perusahaan sumber dan tujuan.");
+  }
+}
+
+function mappedIdentity(scope: FleetFinanceScope) {
+  return { companyId: scope.companyId, sourceCompanyId: scope.sourceCompanyId };
+}
+
 function required(value: unknown, name: string): string {
   const v = String(value ?? "").trim();
   if (!v) throw new Error(`${name} belum dikonfigurasi.`);
@@ -24,6 +74,10 @@ function clientConfig(options: { requireToken?: boolean } = {}) {
 
 async function request(path: string, init: RequestInit = {}): Promise<Json> {
   const cfg = clientConfig({ requireToken: true });
+  if (process.env.APP_ENV === "development" && process.env.FLEET_CASH_DATABASE_ENABLED_DEV === "true" &&
+      cfg.baseUrl !== "http://fleet-finance-dev:19888") {
+    throw new Error("Fleet cash DEV harus memakai receiver Finance privat yang disetujui.");
+  }
   const response = await fetch(`${cfg.baseUrl}${path}`, {
     ...init,
     headers: {
@@ -77,18 +131,29 @@ async function getFleetAccountingSettingsDirect(companyId: number) {
 
 export async function getFleetAccountingSettings(companyId: number) {
   const cfg = clientConfig();
+  const scope = financeScope(companyId, cfg.writeEnabled);
   if (!cfg.baseUrl || !cfg.token) {
     if (cfg.writeEnabled) {
       throw new Error("Central Finance service token wajib sebelum write diaktifkan.");
     }
-    return getFleetAccountingSettingsDirect(companyId);
+    if (scope.mapped) {
+      throw new Error("Central Finance API wajib untuk mapping perusahaan Fleet.");
+    }
+    return getFleetAccountingSettingsDirect(scope.sourceCompanyId);
   }
 
-  const result = await request(`/api/integrations/fleet/companies/${encodeURIComponent(companyId)}/accounting-settings`);
+  const path = "/api/integrations/fleet/companies/" + encodeURIComponent(scope.companyId) +
+    "/accounting-settings" +
+    (scope.mapped ? "?sourceCompanyId=" + encodeURIComponent(scope.sourceCompanyId) : "");
+  const result = await request(path);
+  assertFinanceResponseScope(result, scope);
   return {
     fleetCashAccountId: Number(result.fleetCashAccountId) || null,
     fleetDriverReceivableAccountId: Number(result.fleetDriverReceivableAccountId) || null,
     journalId: Number(result.journalId) || null,
+    ...(typeof result.writeEnabled === "boolean" ? { receiverWriteEnabled: result.writeEnabled } : {}),
+    ...(typeof result.writeReady === "boolean" ? { receiverWriteReady: result.writeReady } : {}),
+    ...(scope.mapped ? mappedIdentity(scope) : {}),
   };
 }
 
@@ -99,16 +164,19 @@ export async function updateFleetAccountingSettings(args: {
   journalId: number;
 }) {
   assertCentralFinanceWriteEnabled();
+  const scope = financeScope(args.companyId, true);
   const key = `fleet-accounting-settings:${args.companyId}:${args.fleetCashAccountId}:${args.fleetDriverReceivableAccountId}:${args.journalId}`;
   const result = await request(
-    `/api/integrations/fleet/companies/${encodeURIComponent(args.companyId)}/accounting-settings`,
+    `/api/integrations/fleet/companies/${encodeURIComponent(scope.companyId)}/accounting-settings`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-      body: JSON.stringify(args),
+      body: JSON.stringify({ ...args, ...mappedIdentity(scope) }),
     },
   );
+  assertFinanceResponseScope(result, scope);
   return {
+    ...mappedIdentity(scope),
     fleetCashAccountId: Number(result.fleetCashAccountId) || null,
     fleetDriverReceivableAccountId: Number(result.fleetDriverReceivableAccountId) || null,
     journalId: Number(result.journalId) || null,
@@ -125,15 +193,17 @@ export async function postFleetCashPayment(args: {
   actor?: string | null;
 }) {
   assertCentralFinanceWriteEnabled();
+  const scope = financeScope(args.companyId, true);
   const key = `fleet-cash-payment:${args.companyId}:${args.paymentId}`;
   const result = await request("/api/integrations/fleet/cash-payments", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-    body: JSON.stringify(args),
+    body: JSON.stringify({ ...args, ...mappedIdentity(scope) }),
   });
+  assertFinanceResponseScope(result, scope);
   const entryId = Number(result.entryId ?? result.accountingEntryId);
-  if (!entryId) throw new Error("Central Finance tidak mengembalikan accounting entry ID.");
-  return { entryId, idempotent: Boolean(result.idempotent) };
+  if (!Number.isSafeInteger(entryId) || entryId <= 0) throw new Error("Central Finance tidak mengembalikan accounting entry ID.");
+  return { entryId, idempotent: Boolean(result.idempotent), ...mappedIdentity(scope) };
 }
 
 export async function reverseFleetCashPayment(args: {
@@ -145,13 +215,44 @@ export async function reverseFleetCashPayment(args: {
   actor?: string | null;
 }) {
   assertCentralFinanceWriteEnabled();
+  const scope = financeScope(args.companyId, true);
   const key = `fleet-cash-payment-reversal:${args.companyId}:${args.paymentId}:${args.originalEntryId}`;
   const result = await request("/api/integrations/fleet/cash-payments/reverse", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-    body: JSON.stringify(args),
+    body: JSON.stringify({ ...args, ...mappedIdentity(scope) }),
   });
+  assertFinanceResponseScope(result, scope);
   const entryId = Number(result.entryId ?? result.accountingEntryId);
-  if (!entryId) throw new Error("Central Finance tidak mengembalikan reversal entry ID.");
-  return { entryId, idempotent: Boolean(result.idempotent) };
+  if (!Number.isSafeInteger(entryId) || entryId <= 0) throw new Error("Central Finance tidak mengembalikan reversal entry ID.");
+  return { entryId, idempotent: Boolean(result.idempotent), ...mappedIdentity(scope) };
+}
+
+
+/** Readiness is based on an actual mapped settings response, never configuration alone. */
+export async function getFleetFinanceReadiness(sourceCompanyId = 1) {
+  const cfg = clientConfig();
+  const base = {
+    baseUrlConfigured: Boolean(cfg.baseUrl), tokenConfigured: Boolean(cfg.token),
+    mappingConfigured: Boolean(process.env.FLEET_FINANCE_COMPANY_MAP?.trim()),
+    sourceCompanyId, readReady: false, writeEnabled: cfg.writeEnabled,
+    receiverWriteEnabled: false, receiverWriteReady: false, writeReady: false,
+  };
+  if (!base.baseUrlConfigured || !base.tokenConfigured || !base.mappingConfigured) {
+    return { ...base, reason: "finance_configuration_incomplete" };
+  }
+  try {
+    const scope = financeScope(sourceCompanyId, true);
+    const settings = await getFleetAccountingSettings(sourceCompanyId);
+    const readReady = Boolean(settings.fleetCashAccountId && settings.fleetDriverReceivableAccountId && settings.journalId);
+    const receiverWriteEnabled = "receiverWriteEnabled" in settings && settings.receiverWriteEnabled === true;
+    const receiverWriteReady = "receiverWriteReady" in settings && settings.receiverWriteReady === true;
+    return {
+      ...base, companyId: scope.companyId, readReady, receiverWriteEnabled, receiverWriteReady,
+      writeReady: readReady && cfg.writeEnabled && receiverWriteEnabled && receiverWriteReady,
+      reason: readReady ? null : "finance_settings_incomplete",
+    };
+  } catch {
+    return { ...base, reason: "finance_receiver_unavailable" };
+  }
 }

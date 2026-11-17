@@ -51,3 +51,73 @@ Container dan network staging memakai nama otomatis yang dibatasi oleh Compose p
 - Simpan konfigurasi Nginx rollback dan container DEV lama sampai pengujian pengganti selesai.
 
 Jangan jalankan migrasi manual khusus DEV pada database yang sudah berisi transaksi hanya karena workflow atau checkout baru diperbarui. Migrasi `deploy/dev-only/002...` dan `003...` mempunyai prasyarat tabel kosong dan sudah diterapkan sebelum impor nyata.
+
+## Tujuan Finance Fleet: PT Diva Servis (DEV)
+
+Konfigurasi kandidat ini memakai `FLEET_FINANCE_COMPANY_MAP={"1":3}` pada Fleet dan receiver canonical BizPortal DEV. `1` adalah perusahaan **sumber operasional Fleet**; `3` adalah PT Diva Servis sebagai **tujuan pembukuan Finance**. Mapping tidak memindahkan kendaraan, driver, transaksi Gojek, outstanding, pembayaran sumber, atau riwayat perusahaan 1.
+
+- Settings dibaca melalui API canonical perusahaan 3 dengan `sourceCompanyId=1`. Pembayaran dan pembalikan mempertahankan identitas sumber pada body dan kunci idempotensi; respons harus mengonfirmasi kedua ID perusahaan yang sama.
+- Saat mapping aktif, tidak ada fallback SELECT langsung ke database perusahaan sumber maupun tujuan. Konfigurasi URL/token receiver, mapping server, master perusahaan aktif, serta COA/jurnal Diva harus diverifikasi melalui receiver yang benar. Indikator kesehatan integrasi umum tidak membuktikan settings Diva siap.
+- Tanpa mapping, hanya perilaku baca lama yang masih dapat memakai perusahaan sumber. Semua penulisan wajib memiliki mapping eksplisit. Map kosong, salah format, sumber tanpa mapping, dan respons beda perusahaan ditolak.
+- `CENTRAL_FINANCE_WRITE_ENABLED=false` tetap menjadi default, dan Compose staging tetap memaksanya OFF. Patch ini tidak mengaktifkan writer, membuka route publik, mengubah konfigurasi aktif, atau menyebarkan perubahan ke PROD. Receiver memiliki pengaman penulisan sendiri.
+- Pengujian pembayaran/reversal memakai fixture sintetis di lingkungan terisolasi melalui receiver yang sudah ada. Pastikan posting ulang menghasilkan entry yang sama, company 1 tidak memperoleh jurnal target, perusahaan lain ditolak, pembalikan memakai entry asli yang sesuai, dan seluruh fixture dibersihkan/di-rollback.
+- Jalur yang dihubungkan saat ini adalah **pembayaran kas driver dan reversal** yang sudah ada. Impor Gojek tetap menyimpan data sumber Fleet; pengeluaran dan anggaran tetap catatan Fleet; jurnal laporan tetap draft/perlu review dan endpoint posting laporan tetap menolak. Mapping ini tidak menyatakan seluruh jenis transaksi Fleet sudah diposting ke Finance.
+
+Tes lokal sumber kandidat (tanpa layanan atau database asli):
+
+```sh
+npm run test -w @workspace/fleet-api
+npm run typecheck
+```
+
+
+### Pemulihan pembayaran yang sudah tercatat
+
+Create melakukan preflight settings canonical sebelum menyimpan sumber. Setelah sumber committed, receiver dapat memverifikasi pembayaran tersebut sebelum membuat jurnal Diva. Status `confirmed` ditampilkan sebagai **Menunggu Posting**; pembayaran ini belum mengurangi outstanding lokal. Jika respons Finance terputus, tombol **Lanjutkan Posting** memanggil `POST /api/logistics/fleet/cash-payments/:id/retry` memakai ID dan data sumber yang sama. Endpoint tidak membuat pembayaran pengganti atau menerima jumlah/perusahaan baru dari body.
+
+- Pembuatan pembayaran ditolak selama driver atau outstanding yang sama masih memiliki pembayaran menunggu posting. Outstanding eksplisit harus milik perusahaan dan driver pembayaran tersebut; bila kedua external ID tersedia, nilainya juga harus sama.
+- Pembatalan pembayaran menunggu posting ditolak sampai link jurnal tersimpan. Tombol batal tersedia untuk pembayaran `posted` yang memiliki link jurnal.
+- Retry dan pembatalan memperoleh ulang row lock setelah respons receiver lalu memeriksa status terbaru. Outstanding dikurangi atau dikembalikan satu kali walaupun beberapa request berjalan bersama. Tidak ada row lock sumber yang ditahan selama HTTP ke receiver.
+- Nilai atau tanggal sumber yang berubah ditolak. Receiver tetap memegang validasi mapping, provenance, idempotensi jurnal, dan reversal entry asli. Writer default OFF dan batas route staging publik tetap berlaku.
+
+Uji pemulihan PostgreSQL memakai helper yang sama dengan route Fleet, client sebenarnya, receiver HTTP canonical sebenarnya, dua role non-superuser, dan fixture PostgreSQL sekali pakai tanpa network Docker. Script ini **tidak** menguji sesi Google atau route publik Fleet, dan bukan bukti Finance aktif di DEV/PROD.
+
+Siapkan fixture baru lewat `scripts/test-fleet-finance-dsv-postgres.mjs` di checkout BizPortal kandidat, kemudian jalankan dari checkout Fleet:
+
+```sh
+FLEET_QA_FINANCE_REPO=/path/to/bizportal-candidate \
+FLEET_QA_DEPENDENCIES=/path/to/bizportal-with-dependencies \
+FLEET_QA_PG_SOCKET=/tmp/fleet-finance-dsv-qa-YYYYMMDD/pgsocket \
+node scripts/test-fleet-cash-payment-recovery-postgres.mjs
+```
+
+Harness menolak socket di luar pola fixture privat tersebut. Cakupan meliputi respons hilang sesudah Finance COMMIT, penolakan create duplikat saat pending, retry delapan request dengan satu pengurangan outstanding, cancel yang berlomba dengan penyelesaian create, delapan cancel dengan satu reversal/pengembalian outstanding, penolakan perusahaan sumber salah, ownership driver outstanding, dan seluruh jurnal/ledger tetap perusahaan 3.
+
+
+## Aktivasi kas DEV yang terbatas
+
+Setelah review dan pengujian kandidat, overlay `deploy/docker-compose.dev-cash.yml` dapat dipakai pada **project dan direktori DEV yang sama**. Compose default dan workflow yang dipin tetap mempertahankan staging baca-saja. Jangan mengubah branch guard atau memakai `main`.
+
+Konfigurasi privat tambahan disediakan server melalui alur secret yang berwenang:
+
+- `FLEET_CASH_DATABASE_ENABLED_DEV=true`
+- `FLEET_CASH_DATABASE_URL_DEV`: kredensial khusus `fleet_cash_source_login_dev` pada CST-DEV. Pool hanya dipakai pembayaran/outstanding company 1; reader inventori tidak diganti. Direct dan pooler TLS memakai public CA Supabase Root 2021 yang sama, dengan fingerprint, certificate chain, dan hostname tetap diverifikasi. Trust anchor ini telah diverifikasi terhadap pooler CST-DEV yang sebenarnya; tidak ada fallback TLS tidak aman. Credential yang berubah memerlukan restart terkontrol.
+- `FLEET_FINANCE_COMPANY_MAP={"1":3}`
+- `CENTRAL_FINANCE_BASE_URL=http://fleet-finance-dev:19888`, receiver canonical yang privat pada network DEV yang sama, tanpa port publik.
+- `CENTRAL_FINANCE_SERVICE_TOKEN`: token khusus yang cocok dengan `FLEET_FINANCE_SERVICE_TOKEN` receiver.
+- `CENTRAL_FINANCE_WRITE_ENABLED=true` hanya pada overlay kas setelah receiver/ACL siap. Receiver tetap memiliki flag dan role database sendiri.
+
+Pool memverifikasi login/role yang tepat, bukan superuser/BYPASSRLS, dan RLS aktif pada pembayaran, outstanding, serta header receipt Finance. API kas hanya menerima sesi Google Super Admin perusahaan sumber 1; mutasi juga harus berasal dari origin Fleet DEV yang benar. Kredensial dan DSN tidak boleh dicetak ke log atau PR.
+
+Overlay membuka halaman kas, GET daftar/ringkasan/settings canonical, POST create/retry, PATCH cancel, serta GET status integrasi. Pengaturan akun pada halaman kas ditampilkan baca-saja dan dikelola di Finance. Aksi WA, scheduler, Gojek, impor/upload, pengubahan settings, dan API lain tetap diblokir. Vehicles/Transactions dan reader lamanya dipertahankan.
+
+Sebelum switch pada checkout branch integrasi yang sudah direview dan image SHA yang sama, jalankan:
+
+```sh
+python3 deploy/dev-only/check-cash-stage-config.py --read-only deploy/.env.dev /etc/fleet-finance-dev/fleet-caller.env
+docker compose --project-name fleet-integration-stage --env-file deploy/.env.dev --env-file /etc/fleet-finance-dev/fleet-caller.env -f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev-cash.yml config --quiet
+```
+
+File `/etc/fleet-finance-dev/fleet-caller.env` harus root-only dan tidak mengganti env reader/Google yang sudah ada. Overlay mengikuti flag writer dari file tersebut; default tetap OFF. Setelah gate role dan receiver siap dan writer secara eksplisit diaktifkan oleh coordinator, ulangi preflight tanpa `--read-only` sebelum switch aktivasi. `config --quiet` tidak mencetak nilai secret. Jalankan deployment hanya setelah test/build pada SHA tersebut lulus; coordinator mempertahankan image/config lama untuk rollback dan melakukan switch pada project DEV yang ada. Tidak ada cutover PROD.
+
+`/api/integrationz` sekarang membaca settings receiver sebenarnya. `readReady` gagal bila scope/respons/konfigurasi salah; `writeReady` memerlukan flag caller, capability receiver, serta privilege sumber yang telah diperiksa. Create DEV juga menolak receiver yang belum siap menulis sebelum menyimpan pembayaran sumber. Keberhasilan readiness tidak menggantikan acceptance pembayaran → retry → reversal lewat sesi Google yang sah.

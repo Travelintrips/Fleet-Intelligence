@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
+import { fleetCashPool, isFleetCashDevEnabled } from "../lib/fleet-cash-db";
+import { requireFleetCashDevAccess } from "../lib/fleet-cash-dev-access";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
@@ -9,12 +11,10 @@ import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import { assessFleetVehicleEvidence } from "../lib/fleet-vehicle-evidence";
 import {
-  assertCentralFinanceWriteEnabled,
   getFleetAccountingSettings,
-  postFleetCashPayment,
-  reverseFleetCashPayment,
   updateFleetAccountingSettings,
 } from "../lib/central-finance-client";
+import { createFleetCashPayment, retryFleetCashPayment, cancelFleetCashPayment, FleetCashPaymentError } from "../lib/fleet-cash-payment-service";
 
 class FleetCsvValidationError extends Error {}
 
@@ -419,6 +419,7 @@ router.post("/gojek-connector/worker/fail", async (req, res) => {
 router.use((req, res, next) => {
   void authenticateAdmin(req as AdminRequest, res, next);
 });
+router.use("/cash-payments", requireFleetCashDevAccess);
 
 type SnapshotRow = {
   driver_name: string;
@@ -3144,6 +3145,16 @@ router.put("/reminder-settings", async (req: AdminRequest, res) => {
   }
 });
 
+router.get("/cash-payments/settings", async (req: AdminRequest, res) => {
+  try {
+    const settings = await getFleetAccountingSettings(companyId(req));
+    res.json({ ok: true, ...settings, settingsReadOnly: isFleetCashDevEnabled(), source: "central_finance" });
+  } catch (error) {
+    req.log.error({ error }, "Fleet cash accounting settings failed");
+    res.status(503).json({ error: "Pengaturan Finance Fleet belum tersedia." });
+  }
+});
+
 router.get("/cash-payments", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
@@ -3154,7 +3165,7 @@ router.get("/cash-payments", async (req: AdminRequest, res) => {
     const status = typeof req.query.status === "string" ? req.query.status.trim() : "";
     const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 3650);
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-    const result = await pool.query(
+    const result = await fleetCashPool.query(
       `SELECT cp.*, fo.outstanding_amount AS remaining_outstanding
          FROM public.fleet_cash_payments cp
          LEFT JOIN public.fleet_outstanding fo ON fo.id=cp.outstanding_id AND fo.company_id=cp.company_id
@@ -3179,7 +3190,7 @@ router.get("/cash-payments/summary", async (req: AdminRequest, res) => {
       res.json({ totals: { thisMonthTotal: 0, cancelledTotal: 0, postedTotal: 0, cancelledCount: 0, confirmedCount: 0, postedCount: 0 } });
       return;
     }
-    const result = await pool.query(
+    const result = await fleetCashPool.query(
       `SELECT
           COALESCE(SUM(amount) FILTER (WHERE date_trunc('month',payment_date)=date_trunc('month',CURRENT_DATE) AND status<>'cancelled'),0)::numeric AS this_month_total,
           COALESCE(SUM(amount) FILTER (WHERE status='cancelled'),0)::numeric AS cancelled_total,
@@ -3206,225 +3217,65 @@ router.get("/cash-payments/summary", async (req: AdminRequest, res) => {
 });
 
 router.post("/cash-payments", async (req: AdminRequest, res) => {
-  const client = await pool.connect();
-  let paymentRow: Record<string,unknown> | null = null;
-  let outstandingId: number | null = null;
   try {
-    await ensureFleetTables();
     const cid = companyId(req);
     if (!(await tableExists("fleet_cash_payments"))) {
       res.status(503).json({ error: "Tabel pembayaran fleet belum tersedia." });
       return;
     }
-
-    const body=req.body??{};
-    const driverName=typeof body.driver_name==="string"?body.driver_name.trim():"";
-    const amount=Number(body.amount);
-    const paymentDate=typeof body.payment_date==="string"&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(body.payment_date)
-      ? body.payment_date
-      : new Date().toISOString().slice(0,10);
-    if(!driverName||!Number.isFinite(amount)||amount<=0){
-      res.status(400).json({error:"Nama driver dan jumlah pembayaran wajib valid."});
-      return;
-    }
-
-    // Fail before creating a local payment when Central Finance posting is disabled
-    // or its canonical accounting settings cannot be reached. This avoids leaving
-    // a confirmed local payment that the user may accidentally submit again.
-    assertCentralFinanceWriteEnabled();
-    const canonicalSettings = await getFleetAccountingSettings(cid);
-    if (
-      !canonicalSettings.fleetCashAccountId ||
-      !canonicalSettings.fleetDriverReceivableAccountId ||
-      !canonicalSettings.journalId
-    ) {
-      res.status(409).json({ error: "Fleet Accounting Settings di Central Finance belum lengkap." });
-      return;
-    }
-
-    await client.query("BEGIN");
-    outstandingId=Number(body.outstanding_id)||null;
-    if(!outstandingId){
-      const found=await client.query(
-        `SELECT id FROM public.fleet_outstanding
-          WHERE company_id=$1 AND status='open' AND lower(driver_name)=lower($2)
-          ORDER BY id DESC LIMIT 1 FOR UPDATE`,
-        [cid,driverName],
-      );
-      outstandingId=Number(found.rows[0]?.id)||null;
-    }
-
-    if(outstandingId){
-      const balance=await client.query(
-        "SELECT outstanding_amount FROM public.fleet_outstanding WHERE id=$1 AND company_id=$2 FOR UPDATE",
-        [outstandingId,cid],
-      );
-      const remaining=Number(balance.rows[0]?.outstanding_amount??0);
-      if(!balance.rows[0]) throw new Error("Outstanding driver tidak ditemukan.");
-      if(amount>remaining+0.01) {
-        await client.query("ROLLBACK");
-        res.status(409).json({error:`Pembayaran Rp ${amount.toLocaleString("id-ID")} melebihi outstanding Rp ${remaining.toLocaleString("id-ID")}.`});
-        return;
-      }
-    }
-
-    const payment=await client.query(
-      `INSERT INTO public.fleet_cash_payments
-        (company_id,outstanding_id,driver_name,driver_external_id,driver_phone,vehicle_plate,payment_date,amount,payment_method,reference_no,notes,recorded_by,status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::date,$8,$9,$10,$11,$12,'confirmed')
-       RETURNING *`,
-      [
-        cid,outstandingId,driverName,
-        typeof body.driver_external_id==="string"?body.driver_external_id:null,
-        typeof body.driver_phone==="string"?body.driver_phone:null,
-        typeof body.vehicle_plate==="string"?body.vehicle_plate:null,
-        paymentDate,
-        amount,
-        typeof body.payment_method==="string"&&body.payment_method?body.payment_method:"cash",
-        typeof body.reference_no==="string"?body.reference_no:null,
-        typeof body.notes==="string"?body.notes:null,
-        req.adminUser?.email??"unknown",
-      ],
-    );
-    paymentRow=payment.rows[0] as Record<string,unknown>;
-    await client.query("COMMIT");
-
-    const posting=await postFleetCashPayment({
-      paymentId:Number(paymentRow.id),
-      companyId:cid,
-      amount,
-      driverName,
-      paymentDate,
-      referenceNo:typeof paymentRow.reference_no==="string"?paymentRow.reference_no:null,
-      actor:req.adminUser?.email??"unknown",
+    const body = req.body ?? {};
+    const result = await createFleetCashPayment({
+      companyId: cid,
+      driverName: typeof body.driver_name === "string" ? body.driver_name.trim() : "",
+      amount: Number(body.amount),
+      paymentDate: typeof body.payment_date === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(body.payment_date)
+        ? body.payment_date : new Date().toISOString().slice(0, 10),
+      outstandingId: body.outstanding_id == null ? null : Number(body.outstanding_id),
+      driverExternalId: typeof body.driver_external_id === "string" ? body.driver_external_id : null,
+      driverPhone: typeof body.driver_phone === "string" ? body.driver_phone : null,
+      vehiclePlate: typeof body.vehicle_plate === "string" ? body.vehicle_plate : null,
+      paymentMethod: typeof body.payment_method === "string" ? body.payment_method : "cash",
+      referenceNo: typeof body.reference_no === "string" ? body.reference_no : null,
+      notes: typeof body.notes === "string" ? body.notes : null,
+      actor: req.adminUser?.email ?? "unknown",
     });
+    res.status(201).json(result);
+  } catch (error) {
+    req.log.error({ error }, "Fleet cash payment create/post failed");
+    const message = error instanceof Error ? error.message : "Gagal mencatat pembayaran fleet.";
+    const status = error instanceof FleetCashPaymentError ? error.status
+      : message.includes("belum diaktifkan") || message.includes("belum dikonfigurasi") ? 409 : 503;
+    res.status(status).json({ error: message, ...(error instanceof FleetCashPaymentError ? error.details : {}) });
+  }
+});
 
-    await client.query("BEGIN");
-    const current=await client.query(
-      "SELECT status FROM public.fleet_cash_payments WHERE id=$1 AND company_id=$2 FOR UPDATE",
-      [paymentRow.id,cid],
-    );
-    if(current.rows[0]?.status==="cancelled") {
-      await client.query("ROLLBACK");
-      res.status(409).json({error:"Pembayaran sudah dibatalkan sebelum posting selesai.",paymentId:paymentRow.id});
-      return;
-    }
-
-    await client.query(
-      "UPDATE public.fleet_cash_payments SET accounting_entry_id=$2,status='posted',updated_at=NOW() WHERE id=$1 AND company_id=$3",
-      [paymentRow.id,posting.entryId,cid],
-    );
-
-    if(outstandingId){
-      await client.query(
-        `UPDATE public.fleet_outstanding
-            SET outstanding_amount=GREATEST(outstanding_amount-$3,0),
-                status=CASE WHEN GREATEST(outstanding_amount-$3,0)<=0 THEN 'resolved' ELSE status END,
-                resolved_at=CASE WHEN GREATEST(outstanding_amount-$3,0)<=0 THEN NOW() ELSE resolved_at END,
-                updated_at=NOW()
-          WHERE id=$1 AND company_id=$2`,
-        [outstandingId,cid,amount],
-      );
-    }
-    await client.query("COMMIT");
-
-    res.status(201).json({
-      ok:true,
-      payment:{...paymentRow,status:"posted",accounting_entry_id:posting.entryId},
-      accountingPosted:true,
-      accountingEntryId:posting.entryId,
-      idempotent:posting.idempotent,
-    });
-  } catch(error){
-    await client.query("ROLLBACK").catch(()=>undefined);
-    req.log.error({error,paymentId:paymentRow?.id},"Fleet cash payment create/post failed");
-    const msg=error instanceof Error?error.message:"Gagal mencatat pembayaran fleet.";
-    if(paymentRow?.id){
-      res.status(503).json({
-        error:msg,
-        paymentRecorded:true,
-        paymentId:paymentRow.id,
-        status:"confirmed",
-        accountingPosted:false,
-      });
-      return;
-    }
-    res.status(msg.includes("belum diaktifkan")||msg.includes("belum dikonfigurasi")?409:503).json({error:msg});
-  } finally {
-    client.release();
+router.post("/cash-payments/:id/retry", async (req: AdminRequest, res) => {
+  try {
+    // Identity, amount, and date come only from the same-company committed source.
+    const result = await retryFleetCashPayment(companyId(req), Number(req.params.id), req.adminUser?.email ?? "unknown");
+    res.json(result);
+  } catch (error) {
+    req.log.error({ error }, "Fleet cash payment resume failed");
+    const message = error instanceof Error ? error.message : "Gagal melanjutkan posting pembayaran.";
+    const status = error instanceof FleetCashPaymentError ? error.status
+      : message.includes("belum diaktifkan") || message.includes("belum dikonfigurasi") ? 409 : 503;
+    res.status(status).json({ error: message, ...(error instanceof FleetCashPaymentError ? error.details : {}) });
   }
 });
 
 router.patch("/cash-payments/:id/cancel", async (req: AdminRequest, res) => {
-  const client=await pool.connect();
-  try{
-    const cid=companyId(req);
-    const id=Number(req.params.id);
-    const current=await client.query(
-      "SELECT * FROM public.fleet_cash_payments WHERE id=$1 AND company_id=$2",
-      [id,cid],
-    );
-    const row=current.rows[0] as Record<string,unknown>|undefined;
-    if(!row){
-      res.status(404).json({error:"Pembayaran tidak ditemukan."});
-      return;
-    }
-    if(row.status==="cancelled"){
-      res.json({ok:true,idempotent:true});
-      return;
-    }
-
-    const wasPosted=row.status==="posted";
-    const originalEntryId=Number(row.accounting_entry_id);
-    let reversalEntryId:number|null=null;
-
-    if(wasPosted && originalEntryId){
-      const reversal=await reverseFleetCashPayment({
-        paymentId:id,
-        originalEntryId,
-        companyId:cid,
-        amount:Number(row.amount)||0,
-        driverName:String(row.driver_name??"Driver"),
-        actor:req.adminUser?.email??"unknown",
-      });
-      reversalEntryId=reversal.entryId;
-    }
-
-    await client.query("BEGIN");
-    const locked=await client.query(
-      "SELECT status FROM public.fleet_cash_payments WHERE id=$1 AND company_id=$2 FOR UPDATE",
-      [id,cid],
-    );
-    if(locked.rows[0]?.status==="cancelled"){
-      await client.query("ROLLBACK");
-      res.json({ok:true,idempotent:true,reversalEntryId});
-      return;
-    }
-
-    await client.query(
-      "UPDATE public.fleet_cash_payments SET status='cancelled',updated_at=NOW() WHERE id=$1 AND company_id=$2",
-      [id,cid],
-    );
-
-    if(wasPosted && row.outstanding_id){
-      await client.query(
-        `UPDATE public.fleet_outstanding
-            SET outstanding_amount=outstanding_amount+$3,status='open',resolved_at=NULL,updated_at=NOW()
-          WHERE id=$1 AND company_id=$2`,
-        [row.outstanding_id,cid,Number(row.amount)||0],
-      );
-    }
-
-    await client.query("COMMIT");
-    res.json({ok:true,reversalEntryId});
-  }catch(error){
-    await client.query("ROLLBACK").catch(()=>undefined);
-    req.log.error({error},"Fleet cash payment cancel failed");
-    res.status(503).json({error:error instanceof Error?error.message:"Gagal membatalkan pembayaran."});
-  }finally{
-    client.release();
+  try {
+    const result = await cancelFleetCashPayment(companyId(req), Number(req.params.id), req.adminUser?.email ?? "unknown");
+    res.json(result);
+  } catch (error) {
+    req.log.error({ error }, "Fleet cash payment cancel failed");
+    const message = error instanceof Error ? error.message : "Gagal membatalkan pembayaran.";
+    const status = error instanceof FleetCashPaymentError ? error.status
+      : message.includes("belum diaktifkan") || message.includes("belum dikonfigurasi") ? 409 : 503;
+    res.status(status).json({ error: message, ...(error instanceof FleetCashPaymentError ? error.details : {}) });
   }
 });
+
 const FLEET_EXPENSE_TYPES = ["Ban","Perbaikan","Service Rutin","Asuransi","Bahan Bakar","Parkir","Tilang","Oli","Spare Part","Lainnya"] as const;
 
 async function ensureFleetOpsTables(): Promise<void> {

@@ -5,6 +5,8 @@ import googleAuthRouter from "./google-auth";
 import { createDevAuthRouter } from "./dev-auth";
 import { pool } from "../lib/db";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
+import { getFleetFinanceReadiness } from "../lib/central-finance-client";
+import { getFleetCashDatabaseStatus } from "../lib/fleet-cash-db";
 
 const router: IRouter = Router();
 
@@ -79,7 +81,9 @@ router.get("/readyz", async (req, res) => {
 
 router.get("/integrationz", async (req, res) => {
   try {
-    const wa = await getFleetWaGatewayStatus();
+    const [wa, finance, cashSource] = await Promise.all([
+      getFleetWaGatewayStatus(), getFleetFinanceReadiness(1), getFleetCashDatabaseStatus(),
+    ]);
     res.json({
       status: "ok",
       service: "fleet-intelligence-api",
@@ -95,16 +99,10 @@ router.get("/integrationz", async (req, res) => {
           assignedDeviceCount: wa.visibleDevices.length,
         },
         centralFinance: {
-          baseUrlConfigured: Boolean(String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim()),
-          tokenConfigured: Boolean(String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim()),
-          readReady: true,
-          writeEnabled: String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() === "true",
-          writeReady:
-            String(process.env.CENTRAL_FINANCE_WRITE_ENABLED ?? "false").toLowerCase() !== "true" ||
-            Boolean(
-              String(process.env.CENTRAL_FINANCE_BASE_URL ?? "").trim() &&
-              String(process.env.CENTRAL_FINANCE_SERVICE_TOKEN ?? "").trim()
-            ),
+          ...finance,
+          sourceDatabaseReady: cashSource.readReady,
+          sourceWriteReady: cashSource.writeReady,
+          writeReady: finance.writeReady && cashSource.writeReady,
         },
       },
     });
