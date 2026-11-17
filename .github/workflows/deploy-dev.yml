@@ -1,7 +1,16 @@
-name: Deploy Fleet DEV
+name: Deploy Fleet DEV — pinned integration branch
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validate by default; stage DEV separately only on explicit selection"
+        type: choice
+        required: true
+        default: validate-only
+        options:
+          - validate-only
+          - stage-dev
 
 permissions:
   contents: read
@@ -11,10 +20,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
+  guard:
     runs-on: ubuntu-latest
     steps:
+      - name: Allow only the pinned Fleet DEV integration branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "Travelintrips/Fleet-Intelligence"
+          test "$GITHUB_REF" = "refs/heads/dev/fleet-pr103-pr110-stabilization-20261117"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "Fleet DEV branch and commit guards PASS"
+
+  validate:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact integration commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -22,6 +53,8 @@ jobs:
         run: npm install --ignore-scripts --package-lock=false
       - name: Typecheck
         run: npm run typecheck
+      - name: Test
+        run: npm run test
       - name: Build
         run: npm run build
       - name: Docker build API
@@ -30,6 +63,7 @@ jobs:
         run: docker build -t fleet-web-dev-check apps/web
 
   deploy:
+    if: ${{ github.event.inputs.mode == 'stage-dev' }}
     needs: validate
     runs-on: ubuntu-latest
     environment: fleet-dev
@@ -40,6 +74,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
       DEPLOY_PATH: ${{ secrets.FLEET_DEV_DEPLOY_PATH }}
+      EXPECTED_SHA: ${{ github.sha }}
     steps:
       - name: Validate deploy secrets
         shell: bash
@@ -53,6 +88,9 @@ jobs:
           done
           [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
           [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          # Do not let a misconfigured Fleet DEV secret target an arbitrary or PROD directory.
+          test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"
 
       - name: Configure SSH
         shell: bash
@@ -68,27 +106,54 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          # Stage only; this job never edits public Fleet DEV Nginx or Fleet PROD.
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' EXPECTED_SHA='$EXPECTED_SHA' bash -s" <<'REMOTE'
           set -euo pipefail
           repo="https://github.com/Travelintrips/Fleet-Intelligence.git"
+          dev_branch="dev/fleet-pr103-pr110-stabilization-20261117"
+          test "$DEPLOY_PATH" = "/opt/fleet-intelligence-dev"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
 
-          if [ -d "$DEPLOY_PATH/.git" ]; then
-            cd "$DEPLOY_PATH"
-            git fetch --prune origin main
-            git checkout main
-            git reset --hard origin/main
-          else
-            mkdir -p "$(dirname "$DEPLOY_PATH")"
-            git clone --branch main --single-branch "$repo" "$DEPLOY_PATH"
-            cd "$DEPLOY_PATH"
-          fi
-
-          if [ ! -f deploy/.env.dev ]; then
-            echo "deploy/.env.dev is missing on the server."
+          # Secrets must already exist at the dedicated staging checkout.
+          # Never copy secrets from PROD or from the healthy public DEV canary.
+          if [ ! -f "$DEPLOY_PATH/deploy/.env.dev" ]; then
+            echo "Dedicated Fleet DEV configuration missing; stage aborted."
             exit 20
           fi
+          cd "$DEPLOY_PATH"
+          test -d .git
+          test "$(git remote get-url origin)" = "$repo"
+          git diff --quiet
+          git diff --cached --quiet
 
-          docker compose -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --build --remove-orphans
+          # The remote branch must still point to the exact workflow-selected SHA.
+          git fetch --no-tags origin "refs/heads/$dev_branch"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git checkout --detach "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+          # Verify DB target + limited SELECT-only reader without exposing credentials.
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          lines=Path("deploy/.env.dev").read_text().splitlines()
+          data={}
+          for line in lines:
+              if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+                  continue
+              k,v=line.split("=",1)
+              data[k.strip()]=v.strip().strip("'\\\"")
+          db=data.get("SUPABASE_DATABASE_URL_DEV","")
+          parsed=urlsplit(db)
+          identity=(parsed.username or "")+" "+(parsed.hostname or "")
+          assert "xssrfshdrtdfupgqwfdw" in identity and "nzdweipzckfszczzqtuw" not in identity, "Wrong DEV database"
+          assert "fleet_dev_cst_inventory_reader" in (parsed.username or ""), "DEV reader must be SELECT only"
+          print("CST-DEV project and reader-role configuration PASS")
+          PY
+
+          # Isolated 18460 staging only. No Nginx cutover or orphan cleanup.
+          docker compose --project-name fleet-integration-stage -f deploy/docker-compose.dev.yml --env-file deploy/.env.dev up -d --build
+
 
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:18460/healthz >/dev/null               && curl --fail --silent http://127.0.0.1:18460/api/healthz >/dev/null; then
