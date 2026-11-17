@@ -14,6 +14,8 @@ Buka **Actions → Deploy Fleet DEV — pinned integration branch → Run workfl
 2. Pilih `validate-only` (default) untuk checkout commit persis yang dipilih, typecheck, test, build, dan pemeriksaan Docker. GitHub Actions juga menjalankan **smoke test sementara Docker Compose web→API** dengan konfigurasi sintetis (tanpa DB/Google/WA/Gojek/Finance asli), lalu menghapus container/network dan file konfigurasi uji. Pengujiannya membuktikan web/API HTTP 200, redirect API lokal 308 tanpa header HTTPS, dan autentikasi anonim HTTP 401. Tidak ada SSH, deploy ke VPS, atau perubahan server.
 3. `stage-dev` hanya jika benar-benar ingin membuat/memperbarui **kandidat terpisah** di VPS; butuh konfigurasi staging yang disiapkan khusus.
 
+Selain uji sintetis, `validate-only` menjalankan pemeriksaan **GET publik tanpa cookie** terhadap `https://dev-fleet.cstlogistic.co.id`: status Google DEV-only, OAuth redirect Supabase CST-DEV tanpa mengikuti redirect, halaman Vehicles/Transactions HTTP 200, dan API anonim HTTP 401. Pemeriksaan tidak mengirim POST atau menggunakan token dan **tidak mengklaim akses Google Super Admin dengan sesi nyata telah PASS**.
+
 Workflow versi branch DEV **menolak** eksekusi bila `github.ref` tidak cocok dengan branch integrasi tersebut, dan mencocokkan commit `github.sha` sampai ke checkout di VPS. File workflow pada branch `main` masih versi lama; jangan memilih `main` saat menjalankan workflow. Hanya workflow DEV branch ini yang memiliki pengaman tersebut.
 
 ## Lingkungan GitHub dan staging VPS
