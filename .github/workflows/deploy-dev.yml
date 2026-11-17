@@ -81,7 +81,8 @@ jobs:
           FLEET_DEV_GOOGLE_ALLOWED_CANONICAL_USER_ID=42
           DISABLE_BACKGROUND_SCHEDULERS=true
           CENTRAL_FINANCE_WRITE_ENABLED=false
-          GOJEK_CONNECTOR_ENABLED=false
+          # Deliberately set TRUE here: Compose must force the connector OFF.
+          GOJEK_CONNECTOR_ENABLED=true
           SYNTHETIC
           cleanup() {
             docker compose --project-name fleet-integration-stage \
@@ -123,6 +124,11 @@ jobs:
           tx_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
             --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:18460/api/logistics/fleet/transactions)
+          gojek_code=$(curl --silent --header 'X-Forwarded-Proto: https' \
+            --header 'Content-Type: application/json' \
+            --request POST --data '{}' \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:18460/api/logistics/fleet/gojek-connector/handoff)
           vehicles_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:18460/logistics/fleet-intelligence/vehicles)
           tx_page=$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -130,9 +136,10 @@ jobs:
           test "$plain_code" = 308
           test "$auth_code" = 401
           test "$tx_code" = 401
+          test "$gojek_code" = 409
           test "$vehicles_page" = 200
           test "$tx_page" = 200
-          echo "Synthetic Compose proxy E2E PASS: web=200 api=200 plain=308 anonymous=401/401 pages=200/200"
+          echo "Synthetic Compose proxy E2E PASS: web=200 api=200 plain=308 anonymous=401/401 gojek-disabled=409 pages=200/200"
 
 
   deploy:
