@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
-import { fleetVehicleReadSql } from "../lib/fleet-vehicle-read-model";
+import { fleetVehicleReadSql, withFleetVehicleEvidence } from "../lib/fleet-vehicle-read-model";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
@@ -2308,7 +2308,8 @@ router.get("/vehicles", async (req: AdminRequest, res) => {
     // Optional activity source; preserve inventory GET if transactions are absent.
     const hasTransactionTable = await tableExists("fleet_transactions");
     const result = await pool.query(fleetVehicleReadSql(hasTransactionTable), [cid, limit]);
-    res.json({ vehicles: result.rows });
+    // Display-only evidence; never modifies vehicle/driver status or permits dispatch.
+    res.json({ vehicles: result.rows.map((row) => withFleetVehicleEvidence(row)) });
   } catch (error) {
     req.log.error({ error }, "Fleet vehicles failed");
     res.status(503).json({ error: "Gagal mengambil kendaraan." });
