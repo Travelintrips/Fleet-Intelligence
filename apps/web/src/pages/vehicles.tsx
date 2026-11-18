@@ -198,7 +198,7 @@ export default function FleetVehiclesPage() {
                           </td>
                           <td className="py-2 pr-4">
                             {asset.tax_status === "paid_late_due_unverified"
-                              ? (asset.plate_number === "B1649PNV" || asset.plate_number === "B1650PNV")
+                              ? ((asset.plate_number === "B1649PNV" || asset.plate_number === "B1650PNV") && asset.tax_renewed_on === "2026-11-17")
                                 ? `Sudah dibayar ${fmtDate(asset.tax_renewed_on)} (terlambat 6 hari dari jatuh tempo 11 Nov 2026). Tanggal pajak berikutnya belum diverifikasi.`
                                 : `Sudah dibayar ${fmtDate(asset.tax_renewed_on)}; jatuh tempo baru belum diverifikasi.`
                               : asset.tax_status === "renewed_pending_proof"
