@@ -58,7 +58,9 @@ describe("Diva-owned Fleet DEV assets stay separate from CST operating records",
     expect(route).toContain("tax.expired_date::text AS tax_due_date");
     expect(route).not.toContain("file_url");
     expect(page).toContain("Pajak tahunan habis");
-    expect(page).toContain("Menunggu bukti pajak baru");
+    expect(page).toContain("Jatuh tempo baru belum diverifikasi");
+    expect(page).toContain("text-slate-100");
+    expect(page).toContain("min-w-[1050px]");
     expect(page).toContain("Belum diperpanjang");
     expect(page).toContain("paid_late_due_unverified");
     expect(page).toContain("Sudah dibayar");

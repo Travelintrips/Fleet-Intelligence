@@ -167,36 +167,36 @@ export default function FleetVehiclesPage() {
 
         {/* Owner-only asset registry: separate from CST operational vehicles and evidence totals. */}
         {(isDivaLoading || divaAssets || divaLoadError) && (
-          <Card className="bg-slate-800/60 border-slate-700">
-            <CardContent className="p-4 space-y-3">
-              <h2 className="text-lg font-semibold text-white">Aset PT Diva Servis</h2>
-              <p className="text-xs text-slate-400">
+          <Card className="bg-slate-900 border-slate-600 shadow-sm">
+            <CardContent className="p-5 space-y-4">
+              <h2 className="text-xl font-semibold text-white">Aset PT Diva Servis</h2>
+              <p className="text-sm text-slate-200">
                 Registri kepemilikan Company 3 (baca-saja). Tidak mengubah kendaraan,
                 driver, transaksi, outstanding, atau izin operasional GoCar Company 1.
               </p>
-              {isDivaLoading ? <p className="text-sm text-slate-400">Memuat aset...</p> : divaLoadError ? <p className="text-sm text-amber-300">Aset belum dapat dibaca. Silakan periksa koneksi DEV.</p> : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead><tr className="text-left text-slate-400">
-                      <th className="py-2 pr-4">Nomor polisi</th>
-                      <th className="py-2 pr-4">Merek / model</th>
-                      <th className="py-2 pr-4">Pemilik</th>
-                      <th className="py-2 pr-4">Status aset</th>
-                      <th className="py-2 pr-4">Pajak tahunan habis</th>
-                      <th className="py-2 pr-4">Perpanjangan pajak</th>
-                      <th className="py-2">Ubah pajak</th>
+              {isDivaLoading ? <p className="text-sm text-slate-400">Memuat aset...</p> : divaLoadError ? <p className="text-sm text-amber-300">Data aset belum dapat dibaca. Silakan periksa koneksi DEV.</p> : (
+                <div className="overflow-x-auto rounded-md border border-slate-700">
+                  <table className="w-full min-w-[1050px] table-auto text-sm">
+                    <thead><tr className="bg-slate-800 text-left text-slate-100 uppercase tracking-wide">
+                      <th className="px-3 py-3 pr-4 text-slate-100">Nomor polisi</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Merek / model</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Pemilik</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Status aset</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Pajak tahunan habis</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Perpanjangan pajak</th>
+                      <th className="px-3 py-3">Ubah pajak</th>
                     </tr></thead>
                     <tbody>
                       {divaAssets?.assets.map(asset => (
-                        <tr key={asset.plate_number} className="border-t border-slate-700/50 text-slate-200">
-                          <td className="py-2 pr-4 font-mono">{asset.plate_number}</td>
-                          <td className="py-2 pr-4">{asset.brand} {asset.model}</td>
-                          <td className="py-2 pr-4">PT Diva Servis</td>
-                          <td className="py-2 pr-4">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
+                        <tr key={asset.plate_number} className="border-t border-slate-600 text-slate-100 odd:bg-slate-900 even:bg-slate-800/70">
+                          <td className="px-3 py-3 pr-4 font-mono font-semibold text-white whitespace-nowrap">{asset.plate_number}</td>
+                          <td className="px-3 py-3 pr-4 text-slate-100">{asset.brand} {asset.model}</td>
+                          <td className="px-3 py-3 pr-4 text-slate-100">PT Diva Servis</td>
+                          <td className="px-3 py-3 pr-4 text-slate-100">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
                           <td className="py-2 pr-4 whitespace-nowrap">
-                            {asset.tax_due_date ? fmtDate(asset.tax_due_date) : "Menunggu bukti pajak baru"}
+                            {asset.tax_due_date ? fmtDate(asset.tax_due_date) : "Jatuh tempo baru belum diverifikasi"}
                           </td>
-                          <td className="py-2 pr-4">
+                          <td className="px-3 py-3 pr-4 text-slate-100">
                             {asset.tax_status === "paid_late_due_unverified"
                               ? ((asset.plate_number === "B1649PNV" || asset.plate_number === "B1650PNV") && asset.tax_renewed_on === "2026-11-17")
                                 ? `Sudah dibayar ${fmtDate(asset.tax_renewed_on)} (terlambat 6 hari dari jatuh tempo 11 Nov 2026). Tanggal pajak berikutnya belum diverifikasi.`
