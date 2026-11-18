@@ -41,7 +41,11 @@ export default function FleetVehiclesPage() {
       return res.json() as Promise<{
         companyId: number;
         companyName: string;
-        assets: Array<{ plate_number: string; brand: string; model: string; ownership_type: string; status: string }>;
+        assets: Array<{
+          plate_number: string; brand: string; model: string; ownership_type: string; status: string;
+          tax_renewed_on: string | null; tax_due_date: string | null; tax_status: string | null;
+          tax_reminder_days: number | null;
+        }>;
       }>;
     },
     retry: false,
@@ -146,7 +150,9 @@ export default function FleetVehiclesPage() {
                       <th className="py-2 pr-4">Nomor polisi</th>
                       <th className="py-2 pr-4">Merek / model</th>
                       <th className="py-2 pr-4">Pemilik</th>
-                      <th className="py-2">Status aset</th>
+                      <th className="py-2 pr-4">Status aset</th>
+                      <th className="py-2 pr-4">Pajak tahunan habis</th>
+                      <th className="py-2">Perpanjangan pajak</th>
                     </tr></thead>
                     <tbody>
                       {divaAssets?.assets.map(asset => (
@@ -154,11 +160,21 @@ export default function FleetVehiclesPage() {
                           <td className="py-2 pr-4 font-mono">{asset.plate_number}</td>
                           <td className="py-2 pr-4">{asset.brand} {asset.model}</td>
                           <td className="py-2 pr-4">PT Diva Servis</td>
-                          <td className="py-2">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
+                          <td className="py-2 pr-4">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
+                          <td className="py-2 pr-4 whitespace-nowrap">
+                            {asset.tax_due_date ? fmtDate(asset.tax_due_date) : "Menunggu bukti pajak baru"}
+                          </td>
+                          <td className="py-2">
+                            {asset.tax_status === "renewed_pending_proof"
+                              ? `Dilaporkan diperpanjang ${fmtDate(asset.tax_renewed_on)}; tanggal baru belum diverifikasi`
+                              : asset.tax_status === "due_soon"
+                                ? "Belum diperpanjang"
+                                : "Belum tercatat"}
+                          </td>
                         </tr>
                       ))}
                       {divaAssets?.assets.length === 0 && (
-                        <tr><td colSpan={4} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
+                        <tr><td colSpan={6} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
                       )}
                     </tbody>
                   </table>

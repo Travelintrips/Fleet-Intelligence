@@ -2381,10 +2381,22 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
     // The dedicated DEV reader has RLS SELECT only for Company 3 assets.
     // No fallback to the inventory table or a privileged Finance pool.
     const result = await pool.query(
-      `SELECT plate_number,brand,model,ownership_type,status,unit_number
-         FROM public.fleet_units
-        WHERE company_id=$1
-        ORDER BY plate_number ASC LIMIT 100`,
+      `SELECT u.plate_number,u.brand,u.model,u.ownership_type,u.status,u.unit_number,
+              tax.issued_date::text AS tax_renewed_on,
+              tax.expired_date::text AS tax_due_date,
+              tax.status AS tax_status,tax.reminder_days AS tax_reminder_days
+         FROM public.fleet_units u
+         LEFT JOIN LATERAL (
+           SELECT d.issued_date,d.expired_date,d.status,d.reminder_days
+             FROM public.fleet_documents d
+            WHERE d.company_id=u.company_id
+              AND d.fleet_unit_id=u.id
+              AND d.doc_type='annual_vehicle_tax'
+            ORDER BY d.issued_date DESC NULLS LAST, d.expired_date DESC NULLS LAST
+            LIMIT 1
+         ) tax ON TRUE
+        WHERE u.company_id=$1
+        ORDER BY u.plate_number ASC LIMIT 100`,
       ["3"],
     );
     res.setHeader("Cache-Control", "private, no-store");
