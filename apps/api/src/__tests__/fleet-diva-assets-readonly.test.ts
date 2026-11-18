@@ -14,7 +14,7 @@ describe("Diva-owned Fleet DEV assets stay separate from CST operating records",
     expect(route).toContain('["owner", "super_admin"]');
     expect(route).toContain('tableExists("fleet_units")');
     expect(route).toContain('FROM public.fleet_units');
-    expect(route).toContain("WHERE company_id=$1");
+    expect(route).toContain("WHERE u.company_id=$1");
     expect(route).toContain('["3"]');
     expect(route).toContain('Cache-Control", "private, no-store"');
     expect(route).not.toMatch(/\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?public\.fleet_/i);
@@ -47,5 +47,24 @@ describe("Diva-owned Fleet DEV assets stay separate from CST operating records",
     expect(section).toContain("proxy_pass http://fleet-api:8080");
     expect(section).toContain("proxy_set_header Cookie $http_cookie");
     expect(conf).toContain("location / { return 404; }");
+  });
+  it("adds read-only annual tax expiry and renewal evidence without document secrets", () => {
+    const route = api.split('router.get("/vehicles/diva-assets"')[1]?.split('router.get("/vehicles"')[0];
+    expect(route).toContain("LEFT JOIN LATERAL");
+    expect(route).toContain("FROM public.fleet_documents d");
+    expect(route).toContain("d.company_id=u.company_id");
+    expect(route).toContain("d.fleet_unit_id=u.id");
+    expect(route).toContain("d.doc_type='annual_vehicle_tax'");
+    expect(route).toContain("tax.expired_date::text AS tax_due_date");
+    expect(route).not.toContain("file_url");
+    expect(page).toContain("Pajak tahunan habis");
+    expect(page).toContain("Menunggu bukti pajak baru");
+    expect(page).toContain("Belum diperpanjang");
+    const taxSql = readFileSync(resolve(process.cwd(), "../../deploy/dev-only/diva-annual-tax-readonly-20261118.sql"), "utf8");
+    expect(taxSql).toContain("GRANT SELECT (id) ON public.fleet_units");
+    expect(taxSql).toContain("GRANT SELECT (company_id,fleet_unit_id,doc_type,issued_date,expired_date,status,reminder_days)");
+    expect(taxSql).toContain("AS PERMISSIVE FOR SELECT");
+    expect(taxSql).toContain("AS RESTRICTIVE FOR SELECT");
+    expect(taxSql).not.toMatch(/GRANT\s+(?:ALL|INSERT|UPDATE|DELETE)/i);
   });
 });
