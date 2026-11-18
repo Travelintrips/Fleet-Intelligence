@@ -15,6 +15,8 @@ import {
   updateFleetAccountingSettings,
 } from "../lib/central-finance-client";
 import { createFleetCashPayment, retryFleetCashPayment, cancelFleetCashPayment, FleetCashPaymentError } from "../lib/fleet-cash-payment-service";
+import { editDivaAnnualTax, DivaTaxEditError } from "../lib/fleet-diva-tax-edit";
+import { divaTaxWriterEnabled } from "../lib/fleet-diva-tax-db";
 
 class FleetCsvValidationError extends Error {}
 
@@ -2382,12 +2384,14 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
     // No fallback to the inventory table or a privileged Finance pool.
     const result = await pool.query(
       `SELECT u.plate_number,u.brand,u.model,u.ownership_type,u.status,u.unit_number,
+              tax.id AS tax_document_id,
+              tax.updated_at::text AS tax_version,
               tax.issued_date::text AS tax_renewed_on,
               tax.expired_date::text AS tax_due_date,
               tax.status AS tax_status,tax.reminder_days AS tax_reminder_days
          FROM public.fleet_units u
          LEFT JOIN LATERAL (
-           SELECT d.issued_date,d.expired_date,d.status,d.reminder_days
+           SELECT d.id,d.updated_at,d.issued_date,d.expired_date,d.status,d.reminder_days
              FROM public.fleet_documents d
             WHERE d.company_id=u.company_id
               AND d.fleet_unit_id=u.id
@@ -2400,10 +2404,39 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
       ["3"],
     );
     res.setHeader("Cache-Control", "private, no-store");
-    res.json({ companyId: 3, companyName: "PT Diva Servis", assets: result.rows });
+    res.json({ companyId: 3, companyName: "PT Diva Servis", taxEditEnabled: divaTaxWriterEnabled() && !!process.env.FLEET_DIVA_TAX_DATABASE_URL_DEV, assets: result.rows });
   } catch (error) {
     req.log.error({ error }, "Diva asset registry read failed");
     res.status(503).json({ error: "Data aset PT Diva Servis belum dapat dibaca." });
+  }
+});
+
+// Separate DEV-only writer. The existing Fleet inventory reader NEVER receives UPDATE.
+router.patch("/vehicles/diva-assets/:plate/tax", async (req: AdminRequest, res) => {
+  const role = String(req.adminUser?.role ?? "").toLowerCase();
+  if (process.env.APP_ENV !== "development" || !divaTaxWriterEnabled() ||
+      !["owner","super_admin"].includes(role) || Number(req.adminUser?.companyId) !== 1 ||
+      process.env.FLEET_DEV_GOOGLE_AUTH_ENABLED !== "true" ||
+      req.get("origin") !== "https://dev-fleet.cstlogistic.co.id" ||
+      !req.secure || req.hostname !== "dev-fleet.cstlogistic.co.id") {
+    res.status(403).json({error:"Edit pajak hanya tersedia untuk Owner/Super Admin Fleet DEV yang terautentikasi."});
+    return;
+  }
+  try {
+    const result = await editDivaAnnualTax(
+      String(req.params.plate ?? "").trim().toUpperCase(),
+      req.body ?? {},
+      req.adminUser?.email ?? "",
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(result);
+  } catch (error) {
+    req.log.error({error: error instanceof DivaTaxEditError ? error.message : error}, "Diva annual tax edit failed");
+    if (error instanceof DivaTaxEditError) {
+      res.status(error.status).json({error:error.message});
+    } else {
+      res.status(503).json({error:"Penyimpanan pajak DEV belum tersedia. Tidak ada perubahan tersimpan."});
+    }
   }
 });
 

@@ -8,6 +8,9 @@ services:
       context: ../apps/api
     env_file:
       - .env.dev
+      # Optional private DEV-only scoped tax editor; never present in PROD or CI.
+      - path: /etc/fleet-diva-tax-dev/runtime.env
+        required: false
     environment:
       APP_ENV: development
       NODE_ENV: production
