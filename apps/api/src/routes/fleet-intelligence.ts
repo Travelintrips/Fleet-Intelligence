@@ -3,6 +3,8 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
 import { fleetVehicleReadSql, withFleetVehicleEvidence } from "../lib/fleet-vehicle-read-model";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
+import { divaAssetReadPool, divaAssetReadEnabled, divaTaxWriterEnabled } from "../lib/fleet-diva-prod-db";
+import { editDivaAnnualTax, DivaTaxEditError } from "../lib/fleet-diva-tax-edit-prod";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
@@ -2294,6 +2296,77 @@ router.get("/drivers/:extId/detail", async (req: AdminRequest, res) => {
   } catch (error) {
     req.log.error({ error }, "Fleet driver detail failed");
     res.status(503).json({ error: "Gagal memuat detail driver." });
+  }
+});
+
+// PROD isolated Company 3 asset registry; never reclassify Gojek operational inventory. Never reclassify CST GoCar operating inventory.
+router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
+  if (process.env.APP_ENV !== "production" ||
+      (!["owner", "super_admin"].includes(String(req.adminUser?.role ?? "").toLowerCase())) || Number(req.adminUser?.companyId) !== 1) {
+    res.status(403).json({ error: "Hanya Owner/Super Admin Fleet PROD yang berwenang." });
+    return;
+  }
+  try {
+    if (!divaAssetReadEnabled()) {
+      res.status(404).json({ error: "Aset Diva belum diaktifkan pada Fleet PROD." });
+      return;
+    }
+    // The dedicated PROD reader has RLS SELECT only for Company 3 assets.
+    // No fallback to the inventory table or a privileged Finance pool.
+    const result = await divaAssetReadPool.query(
+      `SELECT u.plate_number,u.brand,u.model,u.ownership_type,u.status,u.unit_number,
+              tax.id AS tax_document_id,
+              tax.updated_at::text AS tax_version,
+              tax.issued_date::text AS tax_renewed_on,
+              tax.expired_date::text AS tax_due_date,
+              tax.status AS tax_status,tax.reminder_days AS tax_reminder_days
+         FROM public.fleet_units u
+         LEFT JOIN LATERAL (
+           SELECT d.id,d.updated_at,d.issued_date,d.expired_date,d.status,d.reminder_days
+             FROM public.fleet_documents d
+            WHERE d.company_id=u.company_id
+              AND d.fleet_unit_id=u.id
+              AND d.doc_type='annual_vehicle_tax'
+            ORDER BY d.issued_date DESC NULLS LAST, d.expired_date DESC NULLS LAST
+            LIMIT 1
+         ) tax ON TRUE
+        WHERE u.company_id=$1
+        ORDER BY u.plate_number ASC LIMIT 100`,
+      ["3"],
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ companyId: 3, companyName: "PT Diva Servis", taxEditEnabled: divaTaxWriterEnabled() && !!process.env.FLEET_DIVA_TAX_DATABASE_URL_PROD, assets: result.rows });
+  } catch (error) {
+    req.log.error({ error }, "Diva asset registry read failed");
+    res.status(503).json({ error: "Data aset PT Diva Servis belum dapat dibaca." });
+  }
+});
+
+// Production-only scoped editor, disabled until separate PROD approval. The existing Fleet inventory reader NEVER receives UPDATE.
+router.patch("/vehicles/diva-assets/:plate/tax", async (req: AdminRequest, res) => {
+  const role = String(req.adminUser?.role ?? "").toLowerCase();
+  if (process.env.APP_ENV !== "production" || !divaTaxWriterEnabled() ||
+      !["owner","super_admin"].includes(role) || Number(req.adminUser?.companyId) !== 1 ||
+      req.get("origin") !== "https://fleet.cstlogistic.co.id" ||
+      !req.secure || req.hostname !== "fleet.cstlogistic.co.id") {
+    res.status(403).json({error:"Edit pajak memerlukan Owner/Super Admin Fleet PROD yang terautentikasi."});
+    return;
+  }
+  try {
+    const result = await editDivaAnnualTax(
+      String(req.params.plate ?? "").trim().toUpperCase(),
+      req.body ?? {},
+      req.adminUser?.email ?? "",
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(result);
+  } catch (error) {
+    req.log.error({error: error instanceof DivaTaxEditError ? error.message : error}, "Diva annual tax edit failed");
+    if (error instanceof DivaTaxEditError) {
+      res.status(error.status).json({error:error.message});
+    } else {
+      res.status(503).json({error:"Penyimpanan pajak PROD belum diaktifkan. Tidak ada perubahan tersimpan."});
+    }
   }
 });
 
