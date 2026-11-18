@@ -39,4 +39,13 @@ describe("Diva-owned Fleet DEV assets stay separate from CST operating records",
     expect(migration).toContain("company_id = ''3''");
     expect(migration).not.toMatch(/GRANT\s+(?:INSERT|UPDATE|DELETE|ALL)/i);
   });
+  it("keeps DEV staging proxy exact GET-only for Diva asset reads", () => {
+    const conf = readFileSync(resolve(process.cwd(), "../../deploy/dev-only/nginx-staging-readonly.conf"), "utf8");
+    const section = conf.split("location = /api/logistics/fleet/vehicles/diva-assets {")[1]?.split("location = /api/logistics/fleet/transactions {")[0];
+    expect(section).toBeDefined();
+    expect(section).toContain("limit_except GET { deny all;");
+    expect(section).toContain("proxy_pass http://fleet-api:8080");
+    expect(section).toContain("proxy_set_header Cookie $http_cookie");
+    expect(conf).toContain("location / { return 404; }");
+  });
 });
