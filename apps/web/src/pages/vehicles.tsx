@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Car, Plus, ArrowLeft, FileText } from "lucide-react";
+import { Car, Plus, ArrowLeft, FileText, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 
@@ -22,6 +22,10 @@ type Vehicle = Record<string, unknown>;
 export default function FleetVehiclesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editTax, setEditTax] = useState<null | {
+    plate: string; paidOn: string; dueOn: string; status: string; version: string; note: string;
+  }>(null);
+
   const [form, setForm] = useState({ plate: "", vehicleType: "motor", brand: "", model: "", year: "", color: "", notes: "" });
 
   const { data, isLoading } = useQuery({
@@ -41,14 +45,41 @@ export default function FleetVehiclesPage() {
       return res.json() as Promise<{
         companyId: number;
         companyName: string;
+        taxEditEnabled: boolean;
         assets: Array<{
           plate_number: string; brand: string; model: string; ownership_type: string; status: string;
+          tax_document_id: number | null; tax_version: string | null;
           tax_renewed_on: string | null; tax_due_date: string | null; tax_status: string | null;
           tax_reminder_days: number | null;
         }>;
       }>;
     },
     retry: false,
+  });
+
+  const updateTax = useMutation({
+    mutationFn: async (edit: NonNullable<typeof editTax>) => {
+      const res = await fetch(
+        `/api/logistics/fleet/vehicles/diva-assets/${encodeURIComponent(edit.plate)}/tax`,
+        {
+          method: "PATCH", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paidOn: edit.paidOn || null, dueOn: edit.dueOn || null,
+            status: edit.status, version: edit.version, note: edit.note,
+          }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(body.error || "Gagal mengubah pajak kendaraan"));
+      return body;
+    },
+    onSuccess: () => {
+      toast.success("Data pajak berhasil diperbarui di DEV");
+      setEditTax(null);
+      qc.invalidateQueries({queryKey: ["fleet-diva-assets"]});
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const createMutation = useMutation({
@@ -152,7 +183,8 @@ export default function FleetVehiclesPage() {
                       <th className="py-2 pr-4">Pemilik</th>
                       <th className="py-2 pr-4">Status aset</th>
                       <th className="py-2 pr-4">Pajak tahunan habis</th>
-                      <th className="py-2">Perpanjangan pajak</th>
+                      <th className="py-2 pr-4">Perpanjangan pajak</th>
+                      <th className="py-2">Ubah pajak</th>
                     </tr></thead>
                     <tbody>
                       {divaAssets?.assets.map(asset => (
@@ -164,7 +196,7 @@ export default function FleetVehiclesPage() {
                           <td className="py-2 pr-4 whitespace-nowrap">
                             {asset.tax_due_date ? fmtDate(asset.tax_due_date) : "Menunggu bukti pajak baru"}
                           </td>
-                          <td className="py-2">
+                          <td className="py-2 pr-4">
                             {asset.tax_status === "paid_late_due_unverified"
                               ? (asset.plate_number === "B1649PNV" || asset.plate_number === "B1650PNV")
                                 ? `Sudah dibayar ${fmtDate(asset.tax_renewed_on)} (terlambat 6 hari dari jatuh tempo 11 Nov 2026). Tanggal pajak berikutnya belum diverifikasi.`
@@ -173,12 +205,28 @@ export default function FleetVehiclesPage() {
                                 ? `Dilaporkan diperpanjang ${fmtDate(asset.tax_renewed_on)}; bukti pembayaran perlu diperiksa`
                               : asset.tax_status === "due_soon"
                                 ? "Belum diperpanjang"
-                                : "Belum tercatat"}
+                                : asset.tax_status === "paid_due_verified"
+                                  ? `Sudah dibayar ${fmtDate(asset.tax_renewed_on)}; pajak berikutnya terverifikasi`
+                                  : asset.tax_status === "unpaid"
+                                    ? "Belum dibayar"
+                                    : "Belum tercatat"}
+                          </td>
+                          <td className="py-2 whitespace-nowrap">
+                            <Button variant="outline" size="sm"
+                              disabled={!divaAssets?.taxEditEnabled || !asset.tax_document_id || !asset.tax_version}
+                              onClick={() => setEditTax({
+                                plate:asset.plate_number,paidOn:asset.tax_renewed_on || "",
+                                dueOn:asset.tax_due_date || "",
+                                status:asset.tax_status || "due_soon",
+                                version:asset.tax_version || "",note:"",
+                              })}>
+                              <Pencil className="w-3 h-3 mr-1" /> {divaAssets?.taxEditEnabled ? "Edit Pajak" : "Edit (belum aktif)"}
+                            </Button>
                           </td>
                         </tr>
                       ))}
                       {divaAssets?.assets.length === 0 && (
-                        <tr><td colSpan={6} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
+                        <tr><td colSpan={7} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -305,6 +353,55 @@ export default function FleetVehiclesPage() {
         </Card>
 
       </div>
+
+      {/* Owner/Super Admin: edit only annual tax metadata of registered Diva units. */}
+      <Dialog open={!!editTax} onOpenChange={(value) => { if (!value && !updateTax.isPending) setEditTax(null); }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+          <DialogHeader><DialogTitle>Edit Pajak Tahunan — {editTax?.plate}</DialogTitle></DialogHeader>
+          {editTax && <div className="space-y-3">
+            <p className="text-xs text-slate-400">Khusus aset PT Diva Servis. Perubahan disimpan dengan riwayat audit, tidak membuat pembayaran bank atau jurnal.</p>
+            <div className="space-y-1">
+              <Label>Status pajak</Label>
+              <Select value={editTax.status} onValueChange={(status) =>
+                setEditTax((p) => p ? ({
+                  ...p,status,
+                  paidOn: ["due_soon","unpaid"].includes(status) ? "" : p.paidOn,
+                  dueOn: status === "paid_late_due_unverified" ? "" : p.dueOn,
+                }) : p)}>
+                <SelectTrigger className="bg-slate-700 border-slate-600 text-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="paid_due_verified">Sudah dibayar, jatuh tempo baru terverifikasi</SelectItem>
+                  <SelectItem value="paid_late_due_unverified">Sudah dibayar, tanggal baru belum diketahui</SelectItem>
+                  <SelectItem value="due_soon">Belum dibayar, mendekati jatuh tempo</SelectItem>
+                  <SelectItem value="unpaid">Belum dibayar</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Tanggal pembayaran / perpanjangan</Label>
+              <Input type="date" className="bg-slate-700 border-slate-600 text-white"
+                value={editTax.paidOn} onChange={(e)=>setEditTax(p=>p?{...p,paidOn:e.target.value}:p)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Tanggal pajak berikutnya habis</Label>
+              <Input type="date" className="bg-slate-700 border-slate-600 text-white"
+                value={editTax.dueOn} onChange={(e)=>setEditTax(p=>p?{...p,dueOn:e.target.value}:p)}
+                disabled={editTax.status==="paid_late_due_unverified"} />
+              <p className="text-xs text-slate-400">Kosongkan jika tanggal masa berlaku baru belum terverifikasi.</p>
+            </div>
+            <div className="space-y-1">
+              <Label>Alasan / catatan perubahan (opsional)</Label>
+              <Input className="bg-slate-700 border-slate-600 text-white" maxLength={300}
+                value={editTax.note} onChange={e=>setEditTax(p=>p?{...p,note:e.target.value}:p)} />
+            </div>
+            <Button className="w-full bg-blue-600 hover:bg-blue-700"
+              disabled={updateTax.isPending || !editTax.version}
+              onClick={()=>updateTax.mutate(editTax)}>
+              {updateTax.isPending ? "Menyimpan..." : "Simpan Perubahan Pajak"}
+            </Button>
+          </div>}
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog Tambah */}
       <Dialog open={open} onOpenChange={setOpen}>
