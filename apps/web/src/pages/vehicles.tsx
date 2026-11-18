@@ -32,6 +32,21 @@ export default function FleetVehiclesPage() {
     },
   });
 
+  const { data: divaAssets, isLoading: isDivaLoading, isError: divaLoadError } = useQuery({
+    queryKey: ["fleet-diva-assets"],
+    queryFn: async () => {
+      const res = await fetch("/api/logistics/fleet/vehicles/diva-assets", { credentials: "include" });
+      if (res.status === 403) return null;
+      if (!res.ok) throw new Error("Tidak dapat mengambil aset PT Diva Servis");
+      return res.json() as Promise<{
+        companyId: number;
+        companyName: string;
+        assets: Array<{ plate_number: string; brand: string; model: string; ownership_type: string; status: string }>;
+      }>;
+    },
+    retry: false,
+  });
+
   const createMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/logistics/fleet/vehicles", {
@@ -113,6 +128,44 @@ export default function FleetVehiclesPage() {
             {evidenceUnknown} kendaraan belum dapat diverifikasi karena data pendukung tidak tersedia.
             Jumlah tersebut tidak dihitung sebagai bukti lengkap.
           </p>
+        )}
+
+        {/* Owner-only asset registry: separate from CST operational vehicles and evidence totals. */}
+        {(isDivaLoading || divaAssets || divaLoadError) && (
+          <Card className="bg-slate-800/60 border-slate-700">
+            <CardContent className="p-4 space-y-3">
+              <h2 className="text-lg font-semibold text-white">Aset PT Diva Servis</h2>
+              <p className="text-xs text-slate-400">
+                Registri kepemilikan Company 3 (baca-saja). Tidak mengubah kendaraan,
+                driver, transaksi, outstanding, atau izin operasional GoCar Company 1.
+              </p>
+              {isDivaLoading ? <p className="text-sm text-slate-400">Memuat aset...</p> : divaLoadError ? <p className="text-sm text-amber-300">Aset belum dapat dibaca. Silakan periksa koneksi DEV.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-slate-400">
+                      <th className="py-2 pr-4">Nomor polisi</th>
+                      <th className="py-2 pr-4">Merek / model</th>
+                      <th className="py-2 pr-4">Pemilik</th>
+                      <th className="py-2">Status aset</th>
+                    </tr></thead>
+                    <tbody>
+                      {divaAssets?.assets.map(asset => (
+                        <tr key={asset.plate_number} className="border-t border-slate-700/50 text-slate-200">
+                          <td className="py-2 pr-4 font-mono">{asset.plate_number}</td>
+                          <td className="py-2 pr-4">{asset.brand} {asset.model}</td>
+                          <td className="py-2 pr-4">PT Diva Servis</td>
+                          <td className="py-2">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
+                        </tr>
+                      ))}
+                      {divaAssets?.assets.length === 0 && (
+                        <tr><td colSpan={4} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* Table */}

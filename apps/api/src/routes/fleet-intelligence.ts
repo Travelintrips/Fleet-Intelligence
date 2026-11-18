@@ -2366,6 +2366,35 @@ router.get("/drivers/:extId/detail", async (req: AdminRequest, res) => {
   }
 });
 
+// DEV-only owner asset registry. Never reclassify CST GoCar operating inventory.
+router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
+  if (process.env.APP_ENV !== "development" ||
+      !["owner", "super_admin"].includes(String(req.adminUser?.role ?? "").toLowerCase())) {
+    res.status(403).json({ error: "Only DEV Owner/Super Admin may view Diva assets." });
+    return;
+  }
+  try {
+    if (!(await tableExists("fleet_units"))) {
+      res.status(503).json({ error: "Fleet asset registry unavailable." });
+      return;
+    }
+    // The dedicated DEV reader has RLS SELECT only for Company 3 assets.
+    // No fallback to the inventory table or a privileged Finance pool.
+    const result = await pool.query(
+      `SELECT plate_number,brand,model,ownership_type,status,unit_number
+         FROM public.fleet_units
+        WHERE company_id=$1
+        ORDER BY plate_number ASC LIMIT 100`,
+      ["3"],
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ companyId: 3, companyName: "PT Diva Servis", assets: result.rows });
+  } catch (error) {
+    req.log.error({ error }, "Diva asset registry read failed");
+    res.status(503).json({ error: "Data aset PT Diva Servis belum dapat dibaca." });
+  }
+});
+
 router.get("/vehicles", async (req: AdminRequest, res) => {
   try {
     const cid = companyId(req);
