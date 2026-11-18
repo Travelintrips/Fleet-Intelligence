@@ -165,8 +165,12 @@ export default function FleetVehiclesPage() {
                             {asset.tax_due_date ? fmtDate(asset.tax_due_date) : "Menunggu bukti pajak baru"}
                           </td>
                           <td className="py-2">
-                            {asset.tax_status === "renewed_pending_proof"
-                              ? `Dilaporkan diperpanjang ${fmtDate(asset.tax_renewed_on)}; tanggal baru belum diverifikasi`
+                            {asset.tax_status === "paid_late_due_unverified"
+                              ? (asset.plate_number === "B1649PNV" || asset.plate_number === "B1650PNV")
+                                ? `Sudah dibayar ${fmtDate(asset.tax_renewed_on)} (terlambat 6 hari dari jatuh tempo 11 Nov 2026). Tanggal pajak berikutnya belum diverifikasi.`
+                                : `Sudah dibayar ${fmtDate(asset.tax_renewed_on)}; jatuh tempo baru belum diverifikasi.`
+                              : asset.tax_status === "renewed_pending_proof"
+                                ? `Dilaporkan diperpanjang ${fmtDate(asset.tax_renewed_on)}; bukti pembayaran perlu diperiksa`
                               : asset.tax_status === "due_soon"
                                 ? "Belum diperpanjang"
                                 : "Belum tercatat"}

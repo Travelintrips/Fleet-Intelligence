@@ -60,6 +60,9 @@ describe("Diva-owned Fleet DEV assets stay separate from CST operating records",
     expect(page).toContain("Pajak tahunan habis");
     expect(page).toContain("Menunggu bukti pajak baru");
     expect(page).toContain("Belum diperpanjang");
+    expect(page).toContain("paid_late_due_unverified");
+    expect(page).toContain("Sudah dibayar");
+    expect(page).toContain("terlambat 6 hari dari jatuh tempo 11 Nov 2026");
     const taxSql = readFileSync(resolve(process.cwd(), "../../deploy/dev-only/diva-annual-tax-readonly-20261118.sql"), "utf8");
     expect(taxSql).toContain("GRANT SELECT (id) ON public.fleet_units");
     expect(taxSql).toContain("GRANT SELECT (company_id,fleet_unit_id,doc_type,issued_date,expired_date,status,reminder_days)");
