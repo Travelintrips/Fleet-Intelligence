@@ -165,7 +165,7 @@ export default function FleetVehiclesPage() {
 
         {isError && <p role="alert" className="text-sm text-rose-300">Gagal memuat data kendaraan Fleet. Coba muat ulang; status belum dapat diverifikasi.</p>}
 
-        {/* Owner-only asset registry: separate from CST operational vehicles and evidence totals. */}
+        {/* Access-scoped Diva registry. Read-only sessions never receive edit controls. */}
         {(isDivaLoading || divaAssets || divaLoadError) && (
           <Card className="bg-slate-900 border-slate-600 shadow-sm">
             <CardContent className="p-5 space-y-4">
@@ -184,7 +184,7 @@ export default function FleetVehiclesPage() {
                       <th className="px-3 py-3 pr-4 text-slate-100">Status aset</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Pajak tahunan habis</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Perpanjangan pajak</th>
-                      <th className="px-3 py-3">Ubah pajak</th>
+                      {divaAssets?.taxEditEnabled && <th className="px-3 py-3">Ubah pajak</th>}
                     </tr></thead>
                     <tbody>
                       {divaAssets?.assets.map(asset => (
@@ -211,22 +211,25 @@ export default function FleetVehiclesPage() {
                                     ? "Belum dibayar"
                                     : "Belum tercatat"}
                           </td>
-                          <td className="py-2 whitespace-nowrap">
-                            <Button variant="outline" size="sm"
-                              disabled={!divaAssets?.taxEditEnabled || !asset.tax_document_id || !asset.tax_version}
-                              onClick={() => setEditTax({
-                                plate:asset.plate_number,paidOn:asset.tax_renewed_on || "",
-                                dueOn:asset.tax_due_date || "",
-                                status:asset.tax_status || "due_soon",
-                                version:asset.tax_version || "",note:"",
-                              })}>
-                              <Pencil className="w-3 h-3 mr-1" /> {divaAssets?.taxEditEnabled ? "Edit Pajak" : "Edit (belum aktif)"}
-                            </Button>
-                          </td>
+                          {divaAssets?.taxEditEnabled && (
+                            <td className="py-2 whitespace-nowrap">
+                              {asset.tax_document_id && asset.tax_version ? (
+                                <Button variant="outline" size="sm"
+                                  onClick={() => setEditTax({
+                                    plate:asset.plate_number,paidOn:asset.tax_renewed_on || "",
+                                    dueOn:asset.tax_due_date || "",
+                                    status:asset.tax_status || "due_soon",
+                                    version:asset.tax_version || "",note:"",
+                                  })}>
+                                  <Pencil className="w-3 h-3 mr-1" /> Edit Pajak
+                                </Button>
+                              ) : <span className="text-xs text-slate-400">Data pajak belum lengkap</span>}
+                            </td>
+                          )}
                         </tr>
                       ))}
                       {divaAssets?.assets.length === 0 && (
-                        <tr><td colSpan={7} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
+                        <tr><td colSpan={divaAssets.taxEditEnabled ? 7 : 6} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -339,7 +342,7 @@ export default function FleetVehiclesPage() {
 
       </div>
 
-      {/* Owner/Super Admin: edit only annual tax metadata of registered Diva units. */}
+      {/* Authorized Fleet accounts: edit only annual tax metadata of Diva units. */}
       <Dialog open={!!editTax} onOpenChange={(value) => { if (!value && !updateTax.isPending) setEditTax(null); }}>
         <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
           <DialogHeader><DialogTitle>Edit Pajak Tahunan — {editTax?.plate}</DialogTitle></DialogHeader>
