@@ -8,7 +8,7 @@
 - PROD Supabase project: `nzdweipzckfszczzqtuw`, not the CST-DEV Supabase project.
 - PROD Gojek/WA/Finance integration health baseline before any release: `/healthz=200`, `/api/readyz=200` with 24 dependencies; WA gateway/device online; Finance writer remains OFF.
 - PROD currently has neither the three assets in `fleet_units` nor their annual tax records.
-- Existing DEV owner confirmation: B1649PNV/B1650PNV paid 17 Nov 2026 (six days after previous due 11 Nov 2026), new expiry **not independently verified**, B1926PDT due 30 Dec 2026 and not renewed. The user recently supplied additional photographed renewal evidence; do not enter a new expiry until the new image's exact date is verified.
+- Existing DEV owner confirmation: B1649PNV/B1650PNV paid 17 Nov 2026 (six days after previous due 11 Nov 2026), new expiry **11 Nov 2027 verified in owner-provided renewal photos**, B1926PDT due 30 Dec 2026 and not renewed. The user recently supplied additional photographed renewal evidence; do not enter a new expiry until the photo's 11 Nov 2027 date is included.
 
 ## PROD-only isolation
 
@@ -25,7 +25,7 @@
 ## Gates before any PROD DB or merge
 
 1. **Finish actual DEV authenticated E2E**: update unchanged B1649PNV tax details with a QA note, verify exactly one audit row; test stale-version 409 and unauthenticated 401, malformed 400; prove outstanding/import/transactions unchanged. Current audit rows were 0 on latest DEV check.
-2. Independently read latest owner-provided renewal documents and match plate, payment date and next due date before asserting verified renewal expiry.
+2. Verify photographed renewed STNK/PKB plates and the 11 Nov 2027 annual due date for B1649/B1650 in the QA audit.
 3. Take safe PROD baseline snapshots of fleet_units, documents, driver/transaction and worker job counts; guarantee no destructive or cross-company modifications.
 4. Review `deploy/prod-diva-asset-release-20261118.sql` in isolation. Its offline PostgreSQL 16 execution passed: 3 asset rows, 3 annual tax rows, 2 dedicated password-NULL roles. **Not yet executed on PROD**.
 5. Provision fresh PROD-only SCRAM secrets through approved secure mechanism; never put them in GitHub, chat or logs. Re-run RLS tests and deny GoCar/finance writes.

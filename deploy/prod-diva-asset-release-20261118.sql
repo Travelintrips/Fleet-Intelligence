@@ -33,10 +33,10 @@ WHERE NOT EXISTS(SELECT 1 FROM public.fleet_units u
                  WHERE upper(regexp_replace(u.plate_number,'[^A-Za-z0-9]','','g'))=d.plate_number);
 WITH desired(plate_number,paid_on,due_on,tax_status,tax_notes) AS (
  VALUES
-  ('B1649PNV',DATE '2026-11-17',NULL::date,'paid_late_due_unverified',
-   'Owner confirms annual tax due 11 Nov 2026, paid 17 Nov 2026 (6 days late due to document delay). New renewal expiry not entered until latest evidence verified.'),
-  ('B1650PNV',DATE '2026-11-17',NULL::date,'paid_late_due_unverified',
-   'Owner confirms annual tax due 11 Nov 2026, paid 17 Nov 2026 (6 days late due to document delay). New renewal expiry not entered until latest evidence verified.'),
+  ('B1649PNV',DATE '2026-11-17',DATE '2027-11-11','paid_due_verified',
+   'Owner confirms annual tax due 11 Nov 2026, paid 17 Nov 2026 (6 days late due to document delay). Renewed STNK/PKB photo confirms annual tax valid through 11 Nov 2027.'),
+  ('B1650PNV',DATE '2026-11-17',DATE '2027-11-11','paid_due_verified',
+   'Owner confirms annual tax due 11 Nov 2026, paid 17 Nov 2026 (6 days late due to document delay). Renewed STNK/PKB photo confirms annual tax valid through 11 Nov 2027.'),
   ('B1926PDT',NULL::date,DATE '2026-12-30','due_soon',
    'Annual tax due 30 Dec 2026; owner reports not renewed as of 18 Nov 2026.')
 )
