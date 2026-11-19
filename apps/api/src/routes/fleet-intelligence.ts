@@ -5,6 +5,7 @@ import { fleetVehicleReadSql, withFleetVehicleEvidence } from "../lib/fleet-vehi
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
 import { divaAssetReadPool, divaAssetReadEnabled, divaTaxWriterEnabled } from "../lib/fleet-diva-prod-db";
 import { editDivaAnnualTax, DivaTaxEditError } from "../lib/fleet-diva-tax-edit-prod";
+import { canManageDivaTax } from "../lib/fleet-diva-staff-authorization";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
@@ -2302,8 +2303,8 @@ router.get("/drivers/:extId/detail", async (req: AdminRequest, res) => {
 // PROD isolated Company 3 asset registry; never reclassify Gojek operational inventory. Never reclassify CST GoCar operating inventory.
 router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
   if (process.env.APP_ENV !== "production" ||
-      (!["owner", "super_admin"].includes(String(req.adminUser?.role ?? "").toLowerCase())) || Number(req.adminUser?.companyId) !== 1) {
-    res.status(403).json({ error: "Hanya Owner/Super Admin Fleet PROD yang berwenang." });
+      !canManageDivaTax(req.adminUser)) {
+    res.status(403).json({ error: "Hanya Owner/Super Admin atau Admin Fleet yang ditugaskan yang berwenang." });
     return;
   }
   try {
@@ -2344,12 +2345,11 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
 
 // Production-only scoped editor, disabled until separate PROD approval. The existing Fleet inventory reader NEVER receives UPDATE.
 router.patch("/vehicles/diva-assets/:plate/tax", async (req: AdminRequest, res) => {
-  const role = String(req.adminUser?.role ?? "").toLowerCase();
   if (process.env.APP_ENV !== "production" || !divaTaxWriterEnabled() ||
-      !["owner","super_admin"].includes(role) || Number(req.adminUser?.companyId) !== 1 ||
+      !canManageDivaTax(req.adminUser) ||
       req.get("origin") !== "https://fleet.cstlogistic.co.id" ||
       !req.secure || req.hostname !== "fleet.cstlogistic.co.id") {
-    res.status(403).json({error:"Edit pajak memerlukan Owner/Super Admin Fleet PROD yang terautentikasi."});
+    res.status(403).json({error:"Edit pajak memerlukan Owner/Super Admin atau Admin Fleet yang ditugaskan."});
     return;
   }
   try {
