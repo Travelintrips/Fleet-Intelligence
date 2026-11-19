@@ -8,7 +8,7 @@ beforeEach(()=>{process.env={...original,APP_ENV:"development",APP_BASE_URL:"htt
 afterEach(()=>{process.env={...original}});
 describe("Hostinger Diva PROD scoped read-only credential attestation",()=>{
  it("is disabled outside exact production origin",async()=>{
-  expect(await divaProdPreflight()).toEqual({status:"blocked",checks:{read:"fail",edit:"fail"}});
+  expect(await divaProdPreflight()).toEqual({status:"blocked",checks:{read:"fail",edit:"fail"},diagnostics:{runtime:"fail",read:"not_set",edit:"not_set"}});
  });
  it("does not read secret values into an HTTP response",()=>{
   const src=readFileSync(resolve(process.cwd(),"src/lib/diva-hostinger-preflight.ts"),"utf8");
@@ -16,7 +16,9 @@ describe("Hostinger Diva PROD scoped read-only credential attestation",()=>{
   expect(routes).toContain('router.get("/diva-preflightz"');
   expect(routes).toContain('res.json(await divaProdPreflight())');
   expect(src).toContain("query_timeout:5500");
-  expect(src).toContain("status:\"blocked\"");
+  expect(src).toContain("not_set");
+  expect(src).toContain("url_invalid");
+  expect(src).toContain("connection_failed");
  });
  it("only queries metadata, RLS and tax evidence; never mutates",()=>{
   const src=readFileSync(resolve(process.cwd(),"src/lib/diva-hostinger-preflight.ts"),"utf8");
