@@ -6,7 +6,7 @@ const PROJECT="nzdweipzckfszczzqtuw";
 const ORIGIN="https://fleet.cstlogistic.co.id";
 const ROLES={read:"fleet_diva_asset_reader_login_prod",edit:"fleet_diva_tax_editor_login_prod"} as const;
 type Status="pass"|"fail";
-type Stage="pass"|"not_set"|"url_invalid"|"connection_failed"|"role_or_rls_failed"|"permissions_failed"|"evidence_failed";
+type Stage="pass"|"not_set"|"url_syntax"|"wrong_scheme"|"wrong_host"|"wrong_role_or_project"|"password_missing"|"wrong_database"|"wrong_port"|"tls_mode"|"ca_invalid"|"connection_failed"|"role_or_rls_failed"|"permissions_failed"|"evidence_failed";
 type Outcome={
  status:"ready"|"blocked";
  checks:{read:Status;edit:Status};
@@ -16,18 +16,20 @@ let cache:{at:number;promise:Promise<Outcome>}|null=null;
 
 function options(source:string,role:typeof ROLES[keyof typeof ROLES]):pg.PoolConfig {
   let uri:URL;
-  try {uri=new URL(source)} catch {throw new Error("INVALID_URL")}
+  try {uri=new URL(source)} catch {throw new Error("url_syntax")}
   const host=uri.hostname.toLowerCase(),port=Number(uri.port||5432),user=decodeURIComponent(uri.username);
   const pooler=/^[a-z0-9-]+\.pooler\.supabase\.com$/.test(host);
   const direct=host===`db.${PROJECT}.supabase.co`;
-  if (!["postgres:","postgresql:"].includes(uri.protocol) ||
-      (!pooler&&!direct) || (direct?user!==role:user!==role+"."+PROJECT) ||
-      !uri.password || uri.pathname!=="/postgres" ||
-      ![5432,6543].includes(port) || (direct&&port!==5432) ||
-      uri.searchParams.get("sslmode")!=="verify-full") throw new Error("PROD_ROLE_OR_TLS_MISMATCH");
+  if(!["postgres:","postgresql:"].includes(uri.protocol))throw new Error("wrong_scheme");
+  if(!pooler&&!direct)throw new Error("wrong_host");
+  if(direct?user!==role:user!==role+"."+PROJECT)throw new Error("wrong_role_or_project");
+  if(!uri.password)throw new Error("password_missing");
+  if(uri.pathname!=="/postgres")throw new Error("wrong_database");
+  if(![5432,6543].includes(port)||(direct&&port!==5432))throw new Error("wrong_port");
+  if(uri.searchParams.get("sslmode")!=="verify-full")throw new Error("tls_mode");
   const cert=new X509Certificate(SUPABASE_FINANCE_ROOT_2021_PEM);
   if(!cert.ca||cert.fingerprint256!==SUPABASE_FINANCE_ROOT_2021_FINGERPRINT256)
-    throw new Error("PROD_CA_MISMATCH");
+    throw new Error("ca_invalid");
   return {host,port,user,password:decodeURIComponent(uri.password),database:"postgres",
     ssl:{ca:SUPABASE_FINANCE_ROOT_2021_PEM,servername:host,rejectUnauthorized:true},
     max:1,connectionTimeoutMillis:5500,idleTimeoutMillis:1000,query_timeout:5500,
@@ -37,7 +39,11 @@ function options(source:string,role:typeof ROLES[keyof typeof ROLES]):pg.PoolCon
 async function check(source:string|undefined,role:typeof ROLES[keyof typeof ROLES],writer:boolean):Promise<Stage> {
   if(!source?.trim())return "not_set";
   let config:pg.PoolConfig;
-  try{config=options(source,role)}catch{return "url_invalid"}
+  try{config=options(source,role)}catch(error){
+    const reason=error instanceof Error?error.message:"url_syntax";
+    const known:Stage[]=["url_syntax","wrong_scheme","wrong_host","wrong_role_or_project","password_missing","wrong_database","wrong_port","tls_mode","ca_invalid"];
+    return known.includes(reason as Stage)?reason as Stage:"url_syntax";
+  }
   const pool=new pg.Pool(config);
   try{
     let identity;
