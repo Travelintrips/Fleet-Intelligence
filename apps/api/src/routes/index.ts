@@ -4,6 +4,7 @@ import localProductionAuthRouter from "./local-production-auth";
 import googleAuthRouter from "./google-auth";
 import { createDevAuthRouter } from "./dev-auth";
 import { pool } from "../lib/db";
+import { divaProdPreflight } from "../lib/diva-hostinger-preflight";
 import { getFleetWaGatewayStatus } from "../lib/wa-gateway-client";
 
 const router: IRouter = Router();
@@ -75,6 +76,13 @@ router.get("/readyz", async (req, res) => {
       reason: "database_unavailable",
     });
   }
+});
+
+// Credential attestation only: SELECT queries, no secret values, no writes, no feature activation.
+// This does not affect fleet /readyz and does not enable Diva assets or tax editing.
+router.get("/diva-preflightz", async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(await divaProdPreflight());
 });
 
 router.get("/integrationz", async (req, res) => {
