@@ -17,7 +17,9 @@ describe("Hostinger Diva PROD scoped read-only credential attestation",()=>{
   expect(routes).toContain('res.json(await divaProdPreflight())');
   expect(src).toContain("query_timeout:5500");
   expect(src).toContain("not_set");
-  expect(src).toContain("url_invalid");
+  expect(src).toContain("wrong_role_or_project");
+  expect(src).toContain("tls_mode");
+  expect(src).toContain("password_missing");
   expect(src).toContain("connection_failed");
  });
  it("only queries metadata, RLS and tax evidence; never mutates",()=>{
