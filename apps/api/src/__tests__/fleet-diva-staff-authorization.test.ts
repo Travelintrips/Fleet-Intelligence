@@ -4,23 +4,29 @@ import type { DevAuthUser } from "../routes/dev-auth";
 const user = (role: string, email = "staff@example.com", companyId: number | null = 1): DevAuthUser => ({
   id: "signed-test-user", email, role, companyId, firstName: null, lastName: null,
 });
+const assigned = "admcst001@gmail.com, almanosetiawan@gmail.com, divatranssoetta@gmail.com, abing2267@gmail.com";
 describe("Diva tax delegated staff access", () => {
-  it("retains existing owner and super-admin authorization for Company 1", () => {
-    expect(canManageDivaTax(user("owner"))).toBe(true);
-    expect(canManageDivaTax(user("super_admin"))).toBe(true);
+  it("retains original Company-1 owner/super-admin access", () => {
+    expect(canManageDivaTax(user("owner", "admcst001@gmail.com"), assigned)).toBe(true);
+    expect(canManageDivaTax(user("super_admin", "owner@example.com"), "")).toBe(true);
   });
-  it("does not grant every admin access by default", () => {
-    expect(canManageDivaTax(user("admin"), "")).toBe(false);
-    expect(canManageDivaTax(user("admin"), "other@example.com")).toBe(false);
+  it("supports the four explicitly selected real Fleet roles/company scopes", () => {
+    expect(canManageDivaTax(user("admin", "almanosetiawan@gmail.com", 1), assigned)).toBe(true);
+    expect(canManageDivaTax(user("admin", "divatranssoetta@gmail.com", 4), assigned)).toBe(true);
+    expect(canManageDivaTax(user("super_admin", "abing2267@gmail.com", 4), assigned)).toBe(true);
   });
-  it("permits only explicitly assigned admin email", () => {
-    expect(canManageDivaTax(user("admin", "STAFF@example.com"), "other@example.com, staff@example.com")).toBe(true);
-    expect(canManageDivaTax(user("admin", "notstaff@example.com"), "staff@example.com")).toBe(false);
+  it("does not allow unrelated admins or wildcard company-wide elevation", () => {
+    expect(canManageDivaTax(user("admin", "erlanggaerix@gmail.com"), assigned)).toBe(false);
+    expect(canManageDivaTax(user("admin", "other@example.com", 4), assigned)).toBe(false);
+    expect(canManageDivaTax(user("super_admin", "other@example.com", 4), assigned)).toBe(false);
+    expect(canManageDivaTax(user("owner", "other@example.com", 4), assigned)).toBe(false);
+    expect(canManageDivaTax(user("admin", "almanosetiawan@gmail.com"), "")).toBe(false);
   });
-  it("rejects Finance/Accounting and other company even when email is listed", () => {
-    expect(canManageDivaTax(user("finance"), "staff@example.com")).toBe(false);
-    expect(canManageDivaTax(user("accounting"), "staff@example.com")).toBe(false);
-    expect(canManageDivaTax(user("admin", "staff@example.com", 3), "staff@example.com")).toBe(false);
-    expect(canManageDivaTax(undefined, "staff@example.com")).toBe(false);
+  it("rejects non-admin roles and other company IDs even when email is listed", () => {
+    expect(canManageDivaTax(user("finance", "almanosetiawan@gmail.com"), assigned)).toBe(false);
+    expect(canManageDivaTax(user("accounting", "almanosetiawan@gmail.com"), assigned)).toBe(false);
+    expect(canManageDivaTax(user("super_admin", "diva@admin.com", 3), assigned + ",diva@admin.com")).toBe(false);
+    expect(canManageDivaTax(user("admin", "divatranssoetta@gmail.com", 3), assigned)).toBe(false);
+    expect(canManageDivaTax(undefined, assigned)).toBe(false);
   });
 });
