@@ -2316,6 +2316,7 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
     // No fallback to the inventory table or a privileged Finance pool.
     const result = await divaAssetReadPool.query(
       `SELECT u.plate_number,u.brand,u.model,u.ownership_type,u.status,u.unit_number,
+              u.chassis_number,u.engine_number,
               tax.id AS tax_document_id,
               tax.updated_at::text AS tax_version,
               tax.issued_date::text AS tax_renewed_on,
