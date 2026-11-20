@@ -119,12 +119,19 @@ const tryBecomeBackgroundLeader = async () => {
   }
 };
 
-const leaderRetryTimer = setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
-leaderRetryTimer.unref();
-setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+// A fully isolated QA/DEV API must never acquire a background leader lock.
+// This gate is only opt-in; existing scheduled work is unchanged when unset.
+const backgroundSchedulersDisabled = process.env.DISABLE_BACKGROUND_SCHEDULERS === "true";
+const leaderRetryTimer = backgroundSchedulersDisabled
+  ? null
+  : setInterval(() => void tryBecomeBackgroundLeader(), 60 * 1000);
+leaderRetryTimer?.unref();
+if (!backgroundSchedulersDisabled) {
+  setTimeout(() => void tryBecomeBackgroundLeader(), 10_000).unref();
+}
 
 const stop = () => {
-  clearInterval(leaderRetryTimer);
+  if (leaderRetryTimer) clearInterval(leaderRetryTimer);
   stopBackgroundJobs();
   const client = backgroundLeaderClient;
   backgroundLeaderClient = null;

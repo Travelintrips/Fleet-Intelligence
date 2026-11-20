@@ -10,6 +10,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
+import { deduplicateGojekRentalPreviews, type GojekRentalSourceEvent } from "../lib/gojek-rental-finance-preview";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
@@ -3827,6 +3828,64 @@ router.get("/row-diff", async (req: AdminRequest, res) => {
     const amountMismatchCount=matched.filter(m=>m.amountMismatch).length;
     res.json({reportId,summary:{rawCount:raw.rowCount??0,txCount:tx.rowCount??0,matchedCount:matched.length,missingCount:missingInTx.length,excessCount:excessInTx.length,amountMismatchCount,totalRawAmount,totalTxAmount,totalDelta:totalTxAmount-totalRawAmount,totalMismatchDelta:matched.filter(m=>m.amountMismatch).reduce((s,m)=>s+Number(m.delta||0),0)},matched,missingInTx,excessInTx});
   }catch(error){req.log.error({error},"Fleet row diff failed");res.status(503).json({error:"Row diff gagal."});}
+});
+
+// Company 1 official Gojek source -> Company 3 Diva draft accounting, DEV-only.
+// Explicitly no WRITE route: never post a journal, settle bank, or mutate CSV data.
+router.get("/accounting/gojek-rental/preview", async (req: AdminRequest, res) => {
+  if (process.env.APP_ENV !== "development") {
+    res.status(404).json({ error: "Gojek rental Finance preview tersedia hanya di DEV." });
+    return;
+  }
+  let cid: number;
+  try { cid = companyId(req); }
+  catch { res.status(403).json({ error: "Sesi perusahaan Fleet diperlukan." }); return; }
+  if (cid !== 1) {
+    res.status(403).json({ error: "Hanya sesi Fleet sumber Company 1." });
+    return;
+  }
+  const raw = typeof req.query.transactionIds === "string" ? req.query.transactionIds.trim() : "";
+  const ids = raw.split(",").map(value => Number(value.trim()));
+  if (!raw || ids.length > 20 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) ||
+      new Set(ids).size !== ids.length) {
+    res.status(400).json({ error: "transactionIds harus 1–20 ID positif unik." });
+    return;
+  }
+  try {
+    const result = await pool.query<{
+      id: number; report_id: number; transaction_type: string;
+      amount: string; transaction_date: string; gopay_reference_id: string | null;
+    }>(
+      `SELECT id,report_id,transaction_type,amount::text AS amount,
+              transaction_date::text AS transaction_date,gopay_reference_id
+         FROM public.fleet_transactions
+        WHERE company_id=$1 AND id=ANY($2::int[])
+        ORDER BY id`,
+      [cid,ids],
+    );
+    if (result.rows.length !== ids.length) {
+      res.status(404).json({ error: "Sumber transaksi Gojek tidak lengkap untuk perusahaan ini." });
+      return;
+    }
+    const events: GojekRentalSourceEvent[] = result.rows.map(row => ({
+      sourceCompanyId: 1, financeCompanyId: 3,
+      transactionId: Number(row.id), reportId: Number(row.report_id),
+      transactionType: row.transaction_type, signedAmount: Number(row.amount),
+      transactionDate: row.transaction_date,
+      providerReferenceId: row.gopay_reference_id,
+    }));
+    const previews = deduplicateGojekRentalPreviews(events);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({
+      source: "official_fleet_transactions", sourceCompanyId: 1, financeCompanyId: 3,
+      postingAllowed: false, isBankSettlement: false,
+      approvalRequired: true,
+      previews,
+    });
+  } catch (error) {
+    req.log?.error({ error }, "Gojek rental DEV finance preview failed");
+    res.status(422).json({ error: "Sumber Gojek belum dapat diklasifikasi untuk jurnal; periksa jenis dan nominal." });
+  }
 });
 
 router.get("/accounting/journals", async (req: AdminRequest, res) => {
