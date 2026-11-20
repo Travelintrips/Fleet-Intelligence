@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../lib/db", () => ({ pool: { query: vi.fn() } }));
 import { requireOwnedFleetAccountingSettings } from "../lib/central-finance-client";
 
 describe("Fleet direct Finance settings: only verified same-company COA/journal IDs pass", () => {
