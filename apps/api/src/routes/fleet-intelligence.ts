@@ -10,7 +10,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
-import { describeGojekSourceComposition } from "../lib/fleet-gojek-source-composition";
+import { describeGojekSourceComposition, verifyGojekSourceParity } from "../lib/fleet-gojek-source-composition";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
@@ -3938,6 +3938,41 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
         )).rows
       : [];
     const sourceComposition = describeGojekSourceComposition(sourceGroups);
+    // Read-only parity catches missing rows/amounts even when summed totals
+    // accidentally offset each other across reports or event categories.
+    const parityRows = hasTx && hasRaw
+      ? (await pool.query(
+          `WITH raw AS (
+             SELECT report_id,transaction_type,COUNT(*)::int AS row_count,
+                    COALESCE(SUM(amount),0)::numeric AS amount
+               FROM public.gojek_raw_transactions
+              WHERE company_id=$1
+              GROUP BY report_id,transaction_type
+           ), normalized AS (
+             SELECT report_id,transaction_type,COUNT(*)::int AS row_count,
+                    COALESCE(SUM(amount),0)::numeric AS amount
+               FROM public.fleet_transactions
+              WHERE company_id=$1
+              GROUP BY report_id,transaction_type
+           )
+           SELECT COALESCE(r.report_id,n.report_id) AS report_id,
+                  COALESCE(r.transaction_type,n.transaction_type) AS transaction_type,
+                  COALESCE(r.row_count,0)::int AS raw_rows,
+                  COALESCE(n.row_count,0)::int AS normalized_rows,
+                  COALESCE(r.amount,0)::numeric AS raw_amount,
+                  COALESCE(n.amount,0)::numeric AS normalized_amount
+             FROM raw r FULL JOIN normalized n
+               ON r.report_id=n.report_id
+              AND r.transaction_type IS NOT DISTINCT FROM n.transaction_type
+            ORDER BY COALESCE(r.report_id,n.report_id) DESC`,
+          [cid],
+        )).rows
+      : [];
+    const sourceParity = hasTx && hasRaw
+      ? verifyGojekSourceParity(parityRows)
+      : { status: "unavailable" as const, groupsChecked: 0, mismatchedGroups: 0, mismatches: [],
+          note: "Raw and normalized source tables must both be present." };
+
 
     const duplicateTransactions = hasTx
       ? (await pool.query(
@@ -3982,6 +4017,7 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
     res.json({
       generatedAt: new Date().toISOString(),
       companyId: cid,
+      sourceParity,
       sourceComposition,
       summary: {
         totalTransactions: Number((summary as Record<string, unknown>).total_transactions ?? 0),
