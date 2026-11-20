@@ -10,6 +10,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
+import { describeGojekSourceComposition } from "../lib/fleet-gojek-source-composition";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
@@ -3920,6 +3921,24 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
         )).rows[0]
       : { total_transactions: 0, total_gross_revenue: 0, total_net_revenue: 0, total_ppn: 0 };
 
+    // This is a source-level classification, not a bank reconciliation
+    // and not an instruction to auto-post rental fees as cash receipts.
+    const sourceGroups = hasTx
+      ? (await pool.query(
+          `SELECT transaction_type,
+                  COUNT(*)::int AS row_count,
+                  COALESCE(SUM(amount),0)::numeric AS signed_amount,
+                  COUNT(*) FILTER (WHERE NULLIF(TRIM(gopay_reference_id),'') IS NOT NULL)::int AS reference_count,
+                  COUNT(*) FILTER (WHERE NULLIF(TRIM(gopay_reference_id),'') IS NULL)::int AS missing_reference_count
+             FROM public.fleet_transactions
+            WHERE company_id=$1
+            GROUP BY transaction_type
+            ORDER BY transaction_type`,
+          [cid],
+        )).rows
+      : [];
+    const sourceComposition = describeGojekSourceComposition(sourceGroups);
+
     const duplicateTransactions = hasTx
       ? (await pool.query(
           `SELECT driver_external_id, transaction_date, COUNT(*)::int AS count
@@ -3963,6 +3982,7 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
     res.json({
       generatedAt: new Date().toISOString(),
       companyId: cid,
+      sourceComposition,
       summary: {
         totalTransactions: Number((summary as Record<string, unknown>).total_transactions ?? 0),
         totalGrossRevenue: Number((summary as Record<string, unknown>).total_gross_revenue ?? 0),
