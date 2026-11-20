@@ -50,6 +50,7 @@ export default function FleetVehiclesPage() {
         taxEditEnabled: boolean;
         assets: Array<{
           plate_number: string; brand: string; model: string; ownership_type: string; status: string;
+          chassis_number: string | null; engine_number: string | null;
           tax_document_id: number | null; tax_version: string | null;
           tax_renewed_on: string | null; tax_due_date: string | null; tax_status: string | null;
           tax_reminder_days: number | null;
@@ -176,10 +177,12 @@ export default function FleetVehiclesPage() {
               </p>
               {isDivaLoading ? <p className="text-sm text-slate-400">Memuat aset...</p> : divaLoadError ? <p className="text-sm text-amber-300">Data aset belum dapat dibaca. Silakan periksa koneksi PROD.</p> : (
                 <div className="overflow-x-auto rounded-md border border-slate-700">
-                  <table className="w-full min-w-[1050px] table-auto text-sm">
+                  <table className="w-full min-w-[1450px] table-auto text-sm">
                     <thead><tr className="bg-slate-800 text-left text-slate-100 uppercase tracking-wide">
                       <th className="px-3 py-3 pr-4 text-slate-100">Nomor polisi</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Merek / model</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Nomor rangka / VIN</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Nomor mesin</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Pemilik</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Status aset</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Pajak tahunan habis</th>
@@ -191,6 +194,8 @@ export default function FleetVehiclesPage() {
                         <tr key={asset.plate_number} className="border-t border-slate-600 text-slate-100 odd:bg-slate-900 even:bg-slate-800/70">
                           <td className="px-3 py-3 pr-4 font-mono font-semibold text-white whitespace-nowrap">{asset.plate_number}</td>
                           <td className="px-3 py-3 pr-4 text-slate-100">{asset.brand} {asset.model}</td>
+                          <td className="px-3 py-3 pr-4 text-slate-100 font-mono text-xs whitespace-nowrap">{asset.chassis_number || "Belum tercatat"}</td>
+                          <td className="px-3 py-3 pr-4 text-slate-100 font-mono text-xs whitespace-nowrap">{asset.engine_number || "Belum tercatat"}</td>
                           <td className="px-3 py-3 pr-4 text-slate-100">PT Diva Servis</td>
                           <td className="px-3 py-3 pr-4 text-slate-100">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status}</td>
                           <td className="py-2 pr-4 whitespace-nowrap">
