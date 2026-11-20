@@ -3,9 +3,6 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const page=readFileSync(resolve(process.cwd(),"src/pages/vehicles.tsx"),"utf8");
-const start=page.indexOf("<h2 className=\"text-xl font-semibold text-white\">Aset PT Diva Servis</h2>");
-const end=page.indexOf("const vehicles =",start);
-const registry=page.slice(start, end>start?end:undefined);
 
 describe("Diva asset document IDs visible in existing table",()=>{
   it("exposes chassis and engine identifiers with safe empty labels",()=>{
