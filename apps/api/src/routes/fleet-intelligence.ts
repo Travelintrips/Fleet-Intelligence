@@ -10,7 +10,7 @@ import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
 import { syncFleetAlertsForCompany } from "../lib/fleet-alerts";
 import { getGojekConnectorConfig } from "../lib/gojek-connector-config";
-import { describeGojekSourceComposition, verifyGojekSourceParity } from "../lib/fleet-gojek-source-composition";
+import { assessGojekFinanceReadiness, describeGojekSourceComposition, verifyGojekSourceParity } from "../lib/fleet-gojek-source-composition";
 import { verifyGojekWorkerRequest } from "../lib/gojek-worker-auth";
 import {
   assertCentralFinanceWriteEnabled,
@@ -3972,6 +3972,10 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
       ? verifyGojekSourceParity(parityRows)
       : { status: "unavailable" as const, groupsChecked: 0, mismatchedGroups: 0, mismatches: [],
           note: "Raw and normalized source tables must both be present." };
+    const financeReadiness = assessGojekFinanceReadiness(sourceComposition, {
+      ...verifyGojekSourceParity(parityRows),
+      status: hasTx && hasRaw ? verifyGojekSourceParity(parityRows).status : "unavailable",
+    });
 
 
     const duplicateTransactions = hasTx
@@ -4018,6 +4022,7 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
       generatedAt: new Date().toISOString(),
       companyId: cid,
       sourceParity,
+      financeReadiness,
       sourceComposition,
       summary: {
         totalTransactions: Number((summary as Record<string, unknown>).total_transactions ?? 0),
