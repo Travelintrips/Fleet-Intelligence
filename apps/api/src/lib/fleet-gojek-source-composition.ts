@@ -62,7 +62,7 @@ export function verifyGojekSourceParity(rows: GojekSourceParityRow[]) {
     Math.round(Number(row.raw_amount) * 100) !== Math.round(Number(row.normalized_amount) * 100),
   );
   return {
-    status: mismatches.length === 0 ? "ok" as const : "warn" as const,
+    status: rows.length === 0 ? "unavailable" as const : mismatches.length === 0 ? "ok" as const : "warn" as const,
     groupsChecked: rows.length,
     mismatchedGroups: mismatches.length,
     mismatches: mismatches.map(row => ({
@@ -74,5 +74,42 @@ export function verifyGojekSourceParity(rows: GojekSourceParityRow[]) {
       normalizedAmount: Number(row.normalized_amount),
     })),
     note: "Read-only CSV-vs-Fleet parity by report and original event type. Not an accounting journal or bank settlement check.",
+  };
+}
+
+/**
+ * Finance release assessment, never a posting instruction.
+ *
+ * Operational CSV import and raw-vs-normalized parity do not depend on a bank
+ * mutation. GL posting requires an independently approved vehicle-rental
+ * contract, real Company 3 account mapping and a period/replay gate.
+ */
+export function assessGojekFinanceReadiness(
+  composition: ReturnType<typeof describeGojekSourceComposition>,
+  parity: ReturnType<typeof verifyGojekSourceParity>,
+) {
+  const supportedCategories = new Set<GojekRentalCategory>([
+    "rental_fee_due", "rental_fee_deduction", "driver_rental_rebate",
+  ]);
+  const unknownRows = composition.categories
+    .filter(group => !supportedCategories.has(group.category))
+    .reduce((sum, group) => sum + group.rowCount, 0);
+  return {
+    sourceCompanyId: 1,
+    financeCompanyId: 3,
+    sourceParityStatus: parity.status,
+    supportedSourceTypes: ["Rental fee due", "Rental fee deduction", "Rental Rebate to Driver - Rental Rebate"],
+    unknownRows,
+    pendingApprovals: [
+      "company3_vehicle_rental_revenue_coa",
+      "company3_driver_receivable_and_gojek_clearing_contract",
+      "company3_rebate_treatment",
+      "finance_period_and_idempotency_gate",
+    ],
+    requiresBankSettlementForCsvImport: false as const,
+    sourceReadyForClassification: parity.status === "ok" && unknownRows === 0,
+    postingReady: false as const,
+    releaseDecision: "NO_GO" as const,
+    explanation: "Source parity does not approve accounting accounts or prove cash settlement. Do not use tenant-rental revenue or bank cash as a substitute.",
   };
 }
