@@ -3972,10 +3972,7 @@ router.get("/validation/report", async (req: AdminRequest, res) => {
       ? verifyGojekSourceParity(parityRows)
       : { status: "unavailable" as const, groupsChecked: 0, mismatchedGroups: 0, mismatches: [],
           note: "Raw and normalized source tables must both be present." };
-    const financeReadiness = assessGojekFinanceReadiness(sourceComposition, {
-      ...verifyGojekSourceParity(parityRows),
-      status: hasTx && hasRaw ? verifyGojekSourceParity(parityRows).status : "unavailable",
-    });
+    const financeReadiness = assessGojekFinanceReadiness(sourceComposition, sourceParity);
 
 
     const duplicateTransactions = hasTx
