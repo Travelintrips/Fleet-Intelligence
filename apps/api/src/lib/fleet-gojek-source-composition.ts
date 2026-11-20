@@ -42,3 +42,37 @@ export function describeGojekSourceComposition(groups: GojekSourceGroup[]) {
     })),
   };
 }
+
+export interface GojekSourceParityRow {
+  report_id: number | string;
+  transaction_type: string | null;
+  raw_rows: number | string;
+  normalized_rows: number | string;
+  raw_amount: number | string;
+  normalized_amount: number | string;
+}
+
+/**
+ * Checks amount and row-count parity per report and original transaction type,
+ * not merely a net total that could mask two offsetting missing events.
+ */
+export function verifyGojekSourceParity(rows: GojekSourceParityRow[]) {
+  const mismatches = rows.filter(row =>
+    Number(row.raw_rows) !== Number(row.normalized_rows) ||
+    Math.round(Number(row.raw_amount) * 100) !== Math.round(Number(row.normalized_amount) * 100),
+  );
+  return {
+    status: mismatches.length === 0 ? "ok" as const : "warn" as const,
+    groupsChecked: rows.length,
+    mismatchedGroups: mismatches.length,
+    mismatches: mismatches.map(row => ({
+      reportId: Number(row.report_id),
+      transactionType: row.transaction_type,
+      rawRows: Number(row.raw_rows),
+      normalizedRows: Number(row.normalized_rows),
+      rawAmount: Number(row.raw_amount),
+      normalizedAmount: Number(row.normalized_amount),
+    })),
+    note: "Read-only CSV-vs-Fleet parity by report and original event type. Not an accounting journal or bank settlement check.",
+  };
+}
