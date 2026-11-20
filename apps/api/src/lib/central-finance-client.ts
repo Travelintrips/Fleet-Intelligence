@@ -46,33 +46,57 @@ export function assertCentralFinanceWriteEnabled() {
   }
 }
 
-async function getFleetAccountingSettingsDirect(companyId: number) {
-  const result = await pool.query(
-    `SELECT s.fleet_cash_account_id,
-            s.fleet_driver_receivable_account_id,
-            COALESCE(
-              s.cash_journal_id,
-              s.bank_journal_id,
-              (SELECT id
-                 FROM public.accounting_journals j
-                WHERE j.company_id=$1
-                  AND COALESCE(j.is_active,true)=true
-                ORDER BY id
-                LIMIT 1)
-            ) AS journal_id
-       FROM public.accounting_settings s
-      WHERE s.company_id=$1
-      LIMIT 1`,
-    [companyId],
-  );
-  const row = result.rows[0] as Record<string, unknown> | undefined;
+export function requireOwnedFleetAccountingSettings(row: Record<string, unknown> | undefined) {
   const fleetCashAccountId = Number(row?.fleet_cash_account_id) || null;
   const fleetDriverReceivableAccountId = Number(row?.fleet_driver_receivable_account_id) || null;
   const journalId = Number(row?.journal_id) || null;
   if (!fleetCashAccountId || !fleetDriverReceivableAccountId || !journalId) {
-    throw new Error("Fleet Cash Payment COA/journal belum dikonfigurasi.");
+    throw new Error("Fleet Cash Payment COA/journal belum valid untuk perusahaan ini.");
   }
   return { fleetCashAccountId, fleetDriverReceivableAccountId, journalId };
+}
+
+async function getFleetAccountingSettingsDirect(companyId: number) {
+  const result = await pool.query(
+    `SELECT cash.id AS fleet_cash_account_id,
+            receivable.id AS fleet_driver_receivable_account_id,
+            COALESCE(
+              cash_journal.id,
+              bank_journal.id,
+              (SELECT j.id
+                 FROM public.accounting_journals j
+                WHERE j.company_id=$1
+                  AND COALESCE(j.is_active,true)=true
+                ORDER BY j.id
+                LIMIT 1)
+            ) AS journal_id
+       FROM public.accounting_settings s
+       LEFT JOIN public.chart_of_accounts cash
+         ON cash.id=s.fleet_cash_account_id
+        AND cash.company_id=s.company_id
+        AND cash.is_active=true
+        AND cash.is_postable=true
+       LEFT JOIN public.chart_of_accounts receivable
+         ON receivable.id=s.fleet_driver_receivable_account_id
+        AND receivable.company_id=s.company_id
+        AND receivable.is_active=true
+        AND receivable.is_postable=true
+       LEFT JOIN public.accounting_journals cash_journal
+         ON cash_journal.id=s.cash_journal_id
+        AND cash_journal.company_id=s.company_id
+        AND COALESCE(cash_journal.is_active,true)=true
+       LEFT JOIN public.accounting_journals bank_journal
+         ON bank_journal.id=s.bank_journal_id
+        AND bank_journal.company_id=s.company_id
+        AND COALESCE(bank_journal.is_active,true)=true
+      WHERE s.company_id=$1
+      LIMIT 1`,
+    [companyId],
+  );
+  // A numeric COA ID alone is insufficient authority. Only same-company,
+  // active, postable COA and an active same-company journal can pass this gate.
+  return requireOwnedFleetAccountingSettings(result.rows[0] as Record<string, unknown> | undefined);
+
 }
 
 export async function getFleetAccountingSettings(companyId: number) {
