@@ -583,7 +583,7 @@ export default function FleetOutstandingPage() {
   };
 
   async function sendWa() {
-    if (!waPreview) return;
+    if (!waPreview || waSending) return;
     const target = normalizedTarget(waPreview.phone);
     if (!target) { toast.error("Nomor tujuan tidak valid. Gunakan 08... atau 62..."); return; }
     setWaSending(true);
@@ -591,7 +591,7 @@ export default function FleetOutstandingPage() {
       const res = await fetch(`/api/logistics/fleet/outstanding/${waPreview.id}/wa`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: target, message: waPreview.message }),
+        body: JSON.stringify({ phone: target, message: waPreview.message, requestId: crypto.randomUUID() }),
       });
       const json = await res.json().catch(() => ({})) as { sent?: number; failed?: number; error?: string };
       if (!res.ok) throw new Error(json.error ?? "Gagal kirim WA");

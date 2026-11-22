@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { pool } from "./db";
+import { fleetSendIdempotencyKey, shouldSuppressFleetSend } from "./fleet-wa-send-policy";
 import { getFleetWaGatewayStatus, normalizeFleetPhone, sendFleetWa } from "./wa-gateway-client";
 
 type ReminderRow = {
@@ -132,10 +133,13 @@ export async function sendFleetOutstandingReminders(args: {
   phoneOverride?: string;
   messageOverride?: string;
   oneTimeResendId?: string;
+  manualRequestId?: string;
 }): Promise<FleetReminderSweepResult> {
   const companyId = args.companyId;
   const suppressHours = Math.max(1, Math.min(168, Number(args.suppressHours) || 24));
   const sendType = args.sendType ?? "manual";
+  // One logical admin action gets a unique gateway key; automatic reminders retain daily deduplication.
+  const manualRequestId = sendType === "auto" ? null : (args.manualRequestId ?? randomUUID());
   const ids = Array.isArray(args.ids) ? args.ids.filter((id) => Number.isSafeInteger(id) && id > 0) : [];
   const minOutstanding = Math.max(50_000, Number(args.minOutstanding) || 0);
 
@@ -176,6 +180,7 @@ export async function sendFleetOutstandingReminders(args: {
                WHERE l.company_id=o.company_id
                  AND l.outstanding_id=o.id
                  AND l.status='sent'
+                 AND l.send_type='auto'
                  AND (l.sent_at AT TIME ZONE 'Asia/Jakarta')::date = (NOW() AT TIME ZONE 'Asia/Jakarta')::date
             ) AS suppressed
        FROM public.fleet_outstanding o
@@ -215,7 +220,7 @@ export async function sendFleetOutstandingReminders(args: {
       );
       suppressed = previous.rowCount !== 0;
     }
-    if (suppressed && !args.oneTimeResendId) {
+    if (shouldSuppressFleetSend(sendType, suppressed, args.oneTimeResendId)) {
       skippedSuppressed += 1;
       continue;
     }
@@ -230,7 +235,11 @@ export async function sendFleetOutstandingReminders(args: {
       const provider = await sendFleetWa({
         phone,
         message,
-        idempotencyKey: args.oneTimeResendId ? `fleet-wa:one-time:${args.oneTimeResendId}:${row.id}` : allowOverrides && args.phoneOverride ? `fleet-wa:${companyId}:${row.id}:selected:${createHash("sha256").update(phone + "\\n" + message).digest("hex").slice(0, 18)}:${new Date().toISOString().slice(0, 13)}` : `fleet-wa:${companyId}:${row.id}:${sendType}:${sendType === "auto" ? new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) : "manual"}`,
+        idempotencyKey: fleetSendIdempotencyKey({
+          companyId, outstandingId: row.id, sendType, manualRequestId,
+          oneTimeResendId: args.oneTimeResendId,
+          todayWib: new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10),
+        }),
       });
       senderDevice = provider.senderDevice ?? senderDevice;
       deviceStatus = provider.deviceStatus ?? deviceStatus;
