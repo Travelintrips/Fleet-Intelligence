@@ -36,6 +36,18 @@ function options(source:string,role:typeof ROLES[keyof typeof ROLES]):pg.PoolCon
     application_name:"fleet-diva-prod-readonly-preflight"};
 }
 
+// Verify the original scoped assets without treating mutable tax dates or
+// additional Company 3 inventory as an authentication failure.
+export function validDivaTaxEvidence(rows: readonly {plate_number: string; due: string | null}[]): boolean {
+  return ["B1649PNV", "B1650PNV", "B1926PDT"].every(plate => {
+    const matches = rows.filter(row => row.plate_number === plate);
+    return matches.length === 1 && typeof matches[0].due === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(matches[0].due) &&
+      Number.isFinite(Date.parse(matches[0].due)) &&
+      new Date(matches[0].due).toISOString().slice(0, 10) === matches[0].due;
+  });
+}
+
 async function check(source:string|undefined,role:typeof ROLES[keyof typeof ROLES],writer:boolean):Promise<Stage> {
   if(!source?.trim())return "not_set";
   let config:pg.PoolConfig;
@@ -81,9 +93,7 @@ async function check(source:string|undefined,role:typeof ROLES[keyof typeof ROLE
         "WHERE u.company_id='3' AND d.doc_type='annual_vehicle_tax' ORDER BY u.plate_number"
       )).rows;
     }catch{return "evidence_failed"}
-    if(rows.length!==3||rows[0].plate_number!=="B1649PNV"||rows[0].due!=="2027-11-11"||
-       rows[1].plate_number!=="B1650PNV"||rows[1].due!=="2027-11-11"||
-       rows[2].plate_number!=="B1926PDT"||rows[2].due!=="2026-12-30")return "evidence_failed";
+    if(!validDivaTaxEvidence(rows))return "evidence_failed";
     return "pass";
   }finally{await pool.end().catch(()=>{})}
 }

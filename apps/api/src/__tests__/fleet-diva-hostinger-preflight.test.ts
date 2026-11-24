@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { divaProdPreflight } from "../lib/diva-hostinger-preflight";
+import { divaProdPreflight, validDivaTaxEvidence } from "../lib/diva-hostinger-preflight";
 
 const original = {...process.env};
 beforeEach(()=>{process.env={...original,APP_ENV:"development",APP_BASE_URL:"https://dev-fleet.cstlogistic.co.id"}});
@@ -37,5 +37,26 @@ describe("Hostinger Diva PROD scoped read-only credential attestation",()=>{
   expect(src).toContain("fleet_diva_tax_editor_login_prod");
   expect(src).toContain('sslmode")!=="verify-full"');
   expect(src).toContain("rejectUnauthorized:true");
+ });
+});
+
+describe("mutable Diva tax evidence", () => {
+ const baseline = [
+  {plate_number:"B1649PNV",due:"2027-11-11"},
+  {plate_number:"B1650PNV",due:"2027-11-11"},
+  {plate_number:"B1926PDT",due:"2026-12-30"},
+ ];
+ it("accepts existing baseline",()=>expect(validDivaTaxEvidence(baseline)).toBe(true));
+ it("accepts a fourth asset and a legitimate date change",()=>expect(validDivaTaxEvidence([
+  {plate_number:"B1131PNR",due:"2026-12-12"},
+  {...baseline[0],due:"2028-11-11"},...baseline.slice(1)
+ ])).toBe(true));
+ it("rejects missing and duplicate scoped records",()=>{
+  expect(validDivaTaxEvidence(baseline.slice(1))).toBe(false);
+  expect(validDivaTaxEvidence([...baseline,baseline[0]])).toBe(false);
+ });
+ it("rejects null or impossible dates",()=>{
+  expect(validDivaTaxEvidence([{...baseline[0],due:null},...baseline.slice(1)])).toBe(false);
+  expect(validDivaTaxEvidence([{...baseline[0],due:"2027-02-30"},...baseline.slice(1)])).toBe(false);
  });
 });
