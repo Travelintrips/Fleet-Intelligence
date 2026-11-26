@@ -12,6 +12,7 @@ import { Car, Plus, ArrowLeft, FileText, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { fleetVehicleEvidenceView } from "@/lib/fleet-vehicle-evidence";
+import { divaTaxIndicator, jakartaCalendarToday } from "@/lib/diva-tax-indicator";
 
 function fmtDate(s: unknown) {
   if (!s) return "—";
@@ -65,6 +66,7 @@ export default function FleetVehiclesPage() {
       }>;
     },
     retry: false,
+    refetchInterval: 15 * 60 * 1000, // Keep date-triggered badges current even on an open page.
   });
 
   const updateTax = useMutation({
@@ -119,6 +121,7 @@ export default function FleetVehiclesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const todayJakarta = jakartaCalendarToday();
   const vehicles = data?.vehicles ?? [];
   const total    = vehicles.length;
   const aktif    = vehicles.filter((v) => v.status === "active").length;
@@ -211,6 +214,7 @@ export default function FleetVehiclesPage() {
               <p className="text-sm text-slate-200">
                 Daftar kendaraan milik PT Diva Servis beserta identitas dan pajak tahunannya.
                 Kendaraan baru dari tombol Tambah Aset Diva akan tampil di sini.
+                Tanda pajak dihitung otomatis dari tanggal jatuh tempo (zona waktu Jakarta; peringatan mengikuti hari pengingat, default 30 hari).
               </p>
               {isDivaLoading ? <p className="text-sm text-slate-400">Memuat aset...</p> : divaLoadError ? <p className="text-sm text-amber-300">Data aset belum dapat dibaca. Silakan periksa koneksi PROD.</p> : (
                 <div className="overflow-x-auto rounded-md border border-slate-700">
@@ -223,11 +227,20 @@ export default function FleetVehiclesPage() {
                       <th className="px-3 py-3 pr-4 text-slate-100">Pemilik</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Status aset</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Pajak tahunan habis</th>
+                      <th className="px-3 py-3 pr-4 text-slate-100">Status pajak</th>
                       <th className="px-3 py-3 pr-4 text-slate-100">Perpanjangan pajak</th>
                       {divaAssets?.taxEditEnabled && <th className="px-3 py-3">Ubah pajak</th>}
                     </tr></thead>
                     <tbody>
-                      {divaAssets?.assets.map(asset => (
+                      {divaAssets?.assets.map(asset => {
+                        const indicator = divaTaxIndicator(asset, todayJakarta);
+                        const taxColors = {
+                          success: "bg-emerald-500/15 text-emerald-300 border-emerald-600/70",
+                          warning: "bg-amber-500/15 text-amber-200 border-amber-500/70",
+                          danger: "bg-rose-500/15 text-rose-200 border-rose-500/70",
+                          neutral: "bg-slate-500/15 text-slate-300 border-slate-500/70",
+                        };
+                        return (
                         <tr key={asset.plate_number} className="border-t border-slate-600 text-slate-100 odd:bg-slate-900 even:bg-slate-800/70">
                           <td className="px-3 py-3 pr-4 font-mono font-semibold text-white whitespace-nowrap">{asset.plate_number}</td>
                           <td className="px-3 py-3 pr-4 text-slate-100">{asset.brand} {asset.model}</td>
@@ -237,6 +250,10 @@ export default function FleetVehiclesPage() {
                           <td className="px-3 py-3 pr-4 text-slate-100">{asset.ownership_type === "own" ? "Milik perusahaan" : "Perlu verifikasi"} · {asset.status === "registered" ? "Terdaftar" : asset.status}</td>
                           <td className="py-2 pr-4 whitespace-nowrap">
                             {asset.tax_due_date ? fmtDate(asset.tax_due_date) : asset.tax_status === "unrecorded" ? "Belum tercatat" : "Jatuh tempo baru belum diverifikasi"}
+                          </td>
+                          <td className="px-3 py-3 pr-4 text-slate-100">
+                            <Badge className={`border whitespace-nowrap ${taxColors[indicator.tone]}`}>{indicator.label}</Badge>
+                            <div className="mt-1 text-xs text-slate-400">{indicator.detail}</div>
                           </td>
                           <td className="px-3 py-3 pr-4 text-slate-100">
                             {asset.tax_status === "paid_late_due_unverified"
@@ -269,9 +286,9 @@ export default function FleetVehiclesPage() {
                             </td>
                           )}
                         </tr>
-                      ))}
+                      );})}
                       {divaAssets?.assets.length === 0 && (
-                        <tr><td colSpan={divaAssets.taxEditEnabled ? 9 : 8} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
+                        <tr><td colSpan={divaAssets.taxEditEnabled ? 10 : 9} className="py-3 text-slate-400">Belum ada aset terdaftar</td></tr>
                       )}
                     </tbody>
                   </table>
