@@ -76,14 +76,19 @@ async function check(source:string|undefined,role:typeof ROLES[keyof typeof ROLE
     let rows;
     try{
       rows=(await pool.query(
-        "SELECT u.plate_number,d.expired_date::text AS due FROM public.fleet_units u "+
-        "JOIN public.fleet_documents d ON d.fleet_unit_id=u.id AND d.company_id=u.company_id "+
-        "WHERE u.company_id='3' AND d.doc_type='annual_vehicle_tax' ORDER BY u.plate_number"
+        "SELECT u.plate_number,u.company_id,u.ownership_type,count(d.id)::int AS tax_count FROM public.fleet_units u "+
+        "LEFT JOIN public.fleet_documents d ON d.fleet_unit_id=u.id AND d.company_id=u.company_id "+
+        "AND d.doc_type='annual_vehicle_tax' "+
+        "GROUP BY u.id,u.plate_number,u.company_id,u.ownership_type ORDER BY u.plate_number"
       )).rows;
     }catch{return "evidence_failed"}
-    if(rows.length!==3||rows[0].plate_number!=="B1649PNV"||rows[0].due!=="2027-11-11"||
-       rows[1].plate_number!=="B1650PNV"||rows[1].due!=="2027-11-11"||
-       rows[2].plate_number!=="B1926PDT"||rows[2].due!=="2026-12-30")return "evidence_failed";
+    // New registrations and legitimate tax renewals must not invalidate readiness.
+    // Query without a company predicate so this also verifies RLS visibility.
+    if(rows.length<4 || rows.some(row=>row.company_id!=="3" || row.ownership_type!=="own" || row.tax_count!==1))
+      return "evidence_failed";
+    const plates=new Set(rows.map(row=>row.plate_number));
+    if(!["B1131PNR","B1649PNV","B1650PNV","B1926PDT"].every(plate=>plates.has(plate)))
+      return "evidence_failed";
     return "pass";
   }finally{await pool.end().catch(()=>{})}
 }

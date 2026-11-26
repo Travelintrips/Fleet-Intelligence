@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Verify Diva asset migration and RLS in isolated PostgreSQL
+        run: npm run test:diva-db
+
       - name: Build
         run: npm run build
 

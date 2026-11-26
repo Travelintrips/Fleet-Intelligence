@@ -3,8 +3,9 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "../lib/db";
 import { fleetVehicleReadSql, withFleetVehicleEvidence } from "../lib/fleet-vehicle-read-model";
 import { authenticateAdmin, type AdminRequest } from "./admin-auth";
-import { divaAssetReadPool, divaAssetReadEnabled, divaTaxWriterEnabled } from "../lib/fleet-diva-prod-db";
+import { divaAssetReadPool, divaAssetReadEnabled, divaTaxWriterEnabled, divaAssetCreateReady } from "../lib/fleet-diva-prod-db";
 import { editDivaAnnualTax, DivaTaxEditError } from "../lib/fleet-diva-tax-edit-prod";
+import { createDivaAsset, DivaAssetCreateError } from "../lib/fleet-diva-asset-create";
 import { canManageDivaTax } from "../lib/fleet-diva-staff-authorization";
 import { sendFleetOutstandingReminders } from "../lib/fleet-wa-reminder";
 import { getFleetWaGatewayStatus, sendFleetWa } from "../lib/wa-gateway-client";
@@ -2337,10 +2338,36 @@ router.get("/vehicles/diva-assets", async (req: AdminRequest, res) => {
       ["3"],
     );
     res.setHeader("Cache-Control", "private, no-store");
-    res.json({ companyId: 3, companyName: "PT Diva Servis", taxEditEnabled: divaTaxWriterEnabled() && !!process.env.FLEET_DIVA_TAX_DATABASE_URL_PROD, assets: result.rows });
+    res.json({ companyId: 3, companyName: "PT Diva Servis", assetCreateEnabled: await divaAssetCreateReady(), taxEditEnabled: divaTaxWriterEnabled() && !!process.env.FLEET_DIVA_TAX_DATABASE_URL_PROD, assets: result.rows });
   } catch (error) {
     req.log.error({ error }, "Diva asset registry read failed");
     res.status(503).json({ error: "Data aset PT Diva Servis belum dapat dibaca." });
+  }
+});
+
+router.post("/vehicles/diva-assets", async (req: AdminRequest, res) => {
+  if (process.env.APP_ENV !== "production" || !divaTaxWriterEnabled() ||
+      !canManageDivaTax(req.adminUser) ||
+      req.get("origin") !== "https://fleet.cstlogistic.co.id" ||
+      !req.secure || req.hostname !== "fleet.cstlogistic.co.id") {
+    res.status(403).json({error:"Penambahan aset memerlukan akun Fleet yang berwenang."});
+    return;
+  }
+  try {
+    if (!(await divaAssetCreateReady())) {
+      res.status(503).json({error:"Penambahan aset PT Diva Servis belum tersedia. Silakan hubungi pengelola Fleet."});
+      return;
+    }
+    const result = await createDivaAsset(req.body ?? {}, req.adminUser?.email ?? "");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.status(201).json(result);
+  } catch (error) {
+    req.log.error({error: error instanceof DivaAssetCreateError ? error.message : error}, "Diva asset registration failed");
+    if (error instanceof DivaAssetCreateError) {
+      res.status(error.status).json({error:error.message});
+    } else {
+      res.status(503).json({error:"Aset belum dapat disimpan. Muat ulang daftar aset sebelum mencoba kembali."});
+    }
   }
 });
 

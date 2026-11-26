@@ -1,8 +1,7 @@
 import { divaTaxWriterPool } from "./fleet-diva-prod-db";
 
-const PLATES = new Set(["B1649PNV", "B1650PNV", "B1926PDT"]);
 export const DIVA_TAX_STATUSES = [
-  "paid_due_verified", "paid_late_due_unverified", "due_soon", "unpaid",
+  "paid_due_verified", "paid_late_due_unverified", "due_soon", "unpaid", "unrecorded",
 ] as const;
 type TaxStatus = (typeof DIVA_TAX_STATUSES)[number];
 
@@ -11,7 +10,7 @@ export class DivaTaxEditError extends Error {
 }
 
 function validDate(input: unknown, allowEmpty: boolean): string | null {
-  if (input === null || input === "") {
+  if (input === null || input === undefined || input === "") {
     if (allowEmpty) return null;
     throw new DivaTaxEditError("Tanggal wajib diisi.");
   }
@@ -24,14 +23,16 @@ function validDate(input: unknown, allowEmpty: boolean): string | null {
   return input;
 }
 
-export function validateDivaTaxEdit(plate: string, body: Record<string,unknown>) {
-  if (!PLATES.has(plate)) throw new DivaTaxEditError("Kendaraan ini bukan aset Diva yang disetujui.", 404);
+export function validateDivaTaxDetails(body: Record<string,unknown>) {
   const status = body.status;
   if (typeof status !== "string" || !(DIVA_TAX_STATUSES as readonly string[]).includes(status)) {
     throw new DivaTaxEditError("Status pajak tidak valid.");
   }
   const paidOn = validDate(body.paidOn, true);
   const dueOn = validDate(body.dueOn, true);
+  if (status === "unrecorded" && (paidOn || dueOn)) {
+    throw new DivaTaxEditError("Status belum tercatat harus tanpa tanggal pembayaran dan jatuh tempo.");
+  }
   if (["paid_due_verified", "paid_late_due_unverified"].includes(status) && !paidOn) {
     throw new DivaTaxEditError("Status sudah dibayar membutuhkan tanggal pembayaran.");
   }
@@ -50,6 +51,16 @@ export function validateDivaTaxEdit(plate: string, body: Record<string,unknown>)
   if (paidOn && dueOn && dueOn <= paidOn) {
     throw new DivaTaxEditError("Jatuh tempo tahun berikutnya harus sesudah tanggal pembayaran.");
   }
+  return { paidOn, dueOn, status: status as TaxStatus };
+}
+
+export function validateDivaTaxEdit(plate: string, body: Record<string,unknown>) {
+  if (!/^[A-Z]{1,3}[0-9]{1,4}[A-Z]{0,3}$/.test(plate)) {
+    throw new DivaTaxEditError("Nomor polisi tidak valid.", 400);
+  }
+  // Ownership is checked against the Company-3 registry under the scoped role,
+  // so every registered Diva asset can use the same tax editor.
+  const tax = validateDivaTaxDetails(body);
   const version = body.version;
   if (typeof version !== "string" || Number.isNaN(new Date(version).getTime())) {
     throw new DivaTaxEditError("Versi data pajak wajib valid untuk mencegah penimpaan.");
@@ -58,7 +69,7 @@ export function validateDivaTaxEdit(plate: string, body: Record<string,unknown>)
   if (note.length > 300 || /[\r\n\u0000-\u001f]/.test(note)) {
     throw new DivaTaxEditError("Catatan maksimal 300 karakter tanpa baris baru.");
   }
-  return { paidOn, dueOn, status: status as TaxStatus, version, note };
+  return { ...tax, version, note };
 }
 
 export async function editDivaAnnualTax(plate: string, input: Record<string,unknown>, actor: string) {
@@ -76,7 +87,7 @@ export async function editDivaAnnualTax(plate: string, input: Record<string,unkn
          FROM public.fleet_documents d
          JOIN public.fleet_units u ON u.id=d.fleet_unit_id AND u.company_id=d.company_id
         WHERE d.company_id='3' AND d.doc_type='annual_vehicle_tax'
-          AND u.company_id='3' AND u.plate_number=$1 LIMIT 2`,[plate],
+          AND u.company_id='3' AND u.ownership_type='own' AND u.plate_number=$1 LIMIT 2`,[plate],
     );
     if (result.rows.length !== 1) throw new DivaTaxEditError("Dokumen pajak tidak ditemukan atau duplikat.", 409);
     const before = result.rows[0];

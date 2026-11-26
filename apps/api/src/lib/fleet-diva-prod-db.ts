@@ -59,3 +59,26 @@ export const divaAssetReadPool={
 export const divaTaxWriterPool={
  connect:async()=> (await getPool("edit")).connect(),
 };
+
+/** Advertise asset creation only after the scoped database migration is ready. */
+export async function divaAssetCreateReady():Promise<boolean> {
+ if(!divaTaxWriterEnabled() || !process.env.FLEET_DIVA_TAX_DATABASE_URL_PROD)return false;
+ try {
+  const p=await getPool("edit");
+  const result=await p.query(`SELECT
+    (SELECT bool_and(has_column_privilege(current_user,'public.fleet_units',col,'INSERT'))
+       FROM unnest(ARRAY['company_id','unit_number','plate_number','vehicle_type','brand','model',
+         'year','color','chassis_number','engine_number','fuel_type','ownership_type','status',
+         'notes','is_active','created_by']) col) AS units_insert,
+    (SELECT bool_and(has_column_privilege(current_user,'public.fleet_documents',col,'INSERT'))
+       FROM unnest(ARRAY['company_id','fleet_unit_id','doc_type','issued_date','expired_date',
+         'status','reminder_days','created_by']) col) AS documents_insert,
+    has_sequence_privilege(current_user,'public.fleet_units_id_seq','USAGE') AS units_sequence,
+    has_sequence_privilege(current_user,'public.fleet_documents_id_seq','USAGE') AS documents_sequence,
+    EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.fleet_diva_units_plate_normalized_uidx')
+       AND indisunique AND indisvalid) AS unique_plate`);
+  const row=result.rows[0];
+  return row?.units_insert===true && row?.documents_insert===true &&
+   row?.units_sequence===true && row?.documents_sequence===true && row?.unique_plate===true;
+ }catch{return false;}
+}
