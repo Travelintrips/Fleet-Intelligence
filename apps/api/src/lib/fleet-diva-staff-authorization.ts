@@ -1,9 +1,9 @@
 import type { DevAuthUser } from "../routes/dev-auth";
 
 /**
- * All Diva tax access is delegated to signed-in existing Fleet accounts.
+ * Diva registry and tax access is delegated to signed-in existing Fleet accounts.
  * Cross-company staff can be explicitly assigned only by exact email and
- * still use the dedicated Company-3 tax-only database role and audit path.
+ * still use the dedicated Company-3 database role and audited write path.
  * No operational Fleet, Gojek, WA or Finance privilege is granted here.
  */
 export function canManageDivaTax(

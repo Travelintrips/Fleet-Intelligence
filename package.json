@@ -10,6 +10,7 @@
     "typecheck": "npm run typecheck -w @workspace/fleet-intelligence && npm run typecheck -w @workspace/fleet-api",
     "build": "npm run build:workspace && node ./scripts/hostinger-build.mjs",
     "test": "npm run test -w @workspace/fleet-intelligence --if-present && npm run test -w @workspace/fleet-api --if-present",
+    "test:diva-db": "node ./scripts/verify-diva-asset-create.mjs",
     "hostinger:build": "npm run build",
     "start": "node --enable-source-maps ./apps/api/dist/index.mjs",
     "start:production": "NODE_ENV=production APP_ENV=production node --enable-source-maps ./apps/api/dist/index.mjs",
@@ -24,5 +25,8 @@
     "esbuild": "0.28.2",
     "tailwindcss": "^4.1.14",
     "vite": "^7.3.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.6.0"
   }
 }
