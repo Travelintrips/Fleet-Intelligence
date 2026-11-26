@@ -30,7 +30,10 @@ export function divaTaxIndicator(tax: DivaTaxSnapshot, today = jakartaCalendarTo
   const daysToday = validDay(today);
   const daysDue = validDay(tax.tax_due_date);
   const daysLeft = daysToday === null || daysDue === null ? null : daysDue - daysToday;
-  const paidVerified = status === "paid_due_verified" && Boolean(tax.tax_renewed_on);
+  // Older Fleet documents use active/expiring_soon rather than the editor-specific paid status.
+  // Only display payment confirmation when there is an actual payment date AND a future due date.
+  const paidVerified = ["paid_due_verified", "active", "expiring_soon"].includes(status)
+    && Boolean(tax.tax_renewed_on) && daysDue !== null;
   const paidUnverified = status === "paid_late_due_unverified" && Boolean(tax.tax_renewed_on);
   const reminder = Number.isInteger(tax.tax_reminder_days) && (tax.tax_reminder_days as number) > 0
     ? Math.min(tax.tax_reminder_days as number, 365) : 30;
@@ -41,14 +44,14 @@ export function divaTaxIndicator(tax: DivaTaxSnapshot, today = jakartaCalendarTo
   if (daysLeft !== null && daysLeft < 0) {
     return {label:"Lewat jatuh tempo",detail: paidVerified
       ? "Pernah dibayar, tetapi masa berlaku terakhir sudah habis"
-      : status === "unrecorded" ? "Tanggal habis; riwayat pembayaran belum tercatat"
+      : ["unrecorded", "active", "expiring_soon"].includes(status) ? "Tanggal habis; riwayat pembayaran/perpanjangan terbaru belum terverifikasi"
       : "Belum ada catatan pembayaran/perpanjangan terbaru",tone:"danger"};
   }
   if (daysLeft !== null && daysLeft <= reminder) {
     return {label:"Pajak dekat",detail:daysLeft === 0
       ? "Jatuh tempo hari ini" : `Jatuh tempo dalam ${daysLeft} hari`,tone:"warning"};
   }
-  if (status === "unrecorded") {
+  if (status === "unrecorded" || (status === "active" && !paidVerified)) {
     return {label:"Belum tercatat",detail:"Pembayaran/perpanjangan belum tercatat",tone:"neutral"};
   }
   if (paidVerified) {
