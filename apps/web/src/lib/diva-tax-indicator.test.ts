@@ -28,7 +28,9 @@ describe("Diva annual tax indicator", () => {
   it("keeps unknown next date explicit even when paid", () => {
     expect(divaTaxIndicator(tax("paid_late_due_unverified",null,"2026-11-17"),"2026-11-26")).toMatchObject({tone:"warning",label:"Sudah dibayar · perlu verifikasi"});
   });
-  it("does not infer tax payment from due date alone", () => {
+  it("still warns for a near or expired due date when payment history is unrecorded", () => {
+    expect(divaTaxIndicator(tax("unrecorded","2026-12-12"),"2026-11-26").label).toBe("Pajak dekat");
+    expect(divaTaxIndicator(tax("unrecorded","2026-11-12"),"2026-11-26").label).toBe("Lewat jatuh tempo");
     expect(divaTaxIndicator(tax("unrecorded","2027-11-11"),"2026-11-26").label).toBe("Belum tercatat");
   });
   it("falls back to 30 day window and supports custom reminder", () => {

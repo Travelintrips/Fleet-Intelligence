@@ -34,9 +34,6 @@ export function divaTaxIndicator(tax: DivaTaxSnapshot, today = jakartaCalendarTo
   const paidUnverified = status === "paid_late_due_unverified" && Boolean(tax.tax_renewed_on);
   const reminder = Number.isInteger(tax.tax_reminder_days) && (tax.tax_reminder_days as number) > 0
     ? Math.min(tax.tax_reminder_days as number, 365) : 30;
-  if (status === "unrecorded") {
-    return {label:"Belum tercatat",detail:"Tanggal dan pembayaran pajak belum dicatat",tone:"neutral"};
-  }
   if (paidUnverified || status === "renewed_pending_proof") {
     return {label:"Sudah dibayar · perlu verifikasi",detail:"Jatuh tempo baru atau bukti pembayaran belum diverifikasi",tone:"warning"};
   }
@@ -44,11 +41,15 @@ export function divaTaxIndicator(tax: DivaTaxSnapshot, today = jakartaCalendarTo
   if (daysLeft !== null && daysLeft < 0) {
     return {label:"Lewat jatuh tempo",detail: paidVerified
       ? "Pernah dibayar, tetapi masa berlaku terakhir sudah habis"
+      : status === "unrecorded" ? "Tanggal habis; riwayat pembayaran belum tercatat"
       : "Belum ada catatan pembayaran/perpanjangan terbaru",tone:"danger"};
   }
   if (daysLeft !== null && daysLeft <= reminder) {
     return {label:"Pajak dekat",detail:daysLeft === 0
       ? "Jatuh tempo hari ini" : `Jatuh tempo dalam ${daysLeft} hari`,tone:"warning"};
+  }
+  if (status === "unrecorded") {
+    return {label:"Belum tercatat",detail:"Pembayaran/perpanjangan belum tercatat",tone:"neutral"};
   }
   if (paidVerified) {
     return {label:"Sudah dibayar",detail:"Jatuh tempo berikutnya telah diverifikasi",tone:"success"};
