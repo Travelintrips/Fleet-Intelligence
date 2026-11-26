@@ -37,6 +37,12 @@ describe("Diva annual tax indicator", () => {
     expect(divaTaxIndicator(tax("due_soon","2027-01-03",null,null),"2026-12-05").label).toBe("Pajak dekat");
     expect(divaTaxIndicator(tax("unpaid","2027-01-03",null,7),"2026-12-05").label).toBe("Belum dibayar");
   });
+  it("handles actual legacy production statuses without pretending unrecorded payments were made", () => {
+    expect(divaTaxIndicator(tax("active","2027-11-11","2026-11-17"),"2026-11-26")).toMatchObject({label:"Sudah dibayar",tone:"success"});
+    expect(divaTaxIndicator(tax("expiring_soon","2026-12-12","2025-12-12"),"2026-11-26")).toMatchObject({label:"Pajak dekat",tone:"warning"});
+    expect(divaTaxIndicator(tax("active","2026-12-30",null),"2026-11-26")).toMatchObject({label:"Belum tercatat",tone:"neutral"});
+    expect(divaTaxIndicator(tax("active","2026-06-20",null),"2026-11-26")).toMatchObject({label:"Lewat jatuh tempo",tone:"danger"});
+  });
   it("rejects nonsense dates rather than claiming an expiry", () => {
     expect(divaTaxIndicator(tax("unpaid","2026-02-30"),"2026-11-26").label).toBe("Belum dibayar");
   });
